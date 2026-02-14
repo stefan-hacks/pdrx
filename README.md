@@ -1,4 +1,4 @@
-# pdrx — Portable Dynamic Reproducible X
+# pdrx — Portable Dynamic Reproducible linuX
 
 **Pure Bash tool for fully reproducible Linux system setups.** No Nix dependency.
 
@@ -18,7 +18,7 @@ Imperatively install/remove packages while automatically updating a **declarativ
 ## Installation
 
 ```bash
-git clone https://github.com/YOUR_USER/pdrx.git
+git clone https://github.com/stefan-hacks/pdrx.git
 cd pdrx
 chmod +x pdrx
 ./pdrx --install
