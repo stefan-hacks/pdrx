@@ -1,0 +1,1026 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC2034
+#
+# pdrx - Portable Dynamic Reproducible X
+# Pure Bash tool for fully reproducible Linux system setups.
+# Imperative install/remove with automatic declarative config sync.
+# Supports: apt, dnf, yum, pacman, zypper, brew, flatpak, snap, cargo
+#
+# No Nix dependency. Works on Debian, Ubuntu, Fedora, Arch, openSUSE, etc.
+
+set -euo pipefail
+
+VERSION="1.0.0"
+
+# =============================================================================
+# PORTABLE HELPERS (POSIX + Bash, works on all Linux)
+# =============================================================================
+
+get_script_path() {
+  local src="${BASH_SOURCE[0]:-$0}"
+  local dir
+  while true; do
+    dir="$(cd "$(dirname "$src")" 2>/dev/null && pwd)"
+    [ -n "$dir" ] || dir="$PWD"
+    src="$(basename "$src")"
+    [ -L "$dir/$src" ] || break
+    src="$(readlink "$dir/$src")"
+    [[ "$src" == /* ]] || src="$dir/$src"
+  done
+  echo "$dir/$src"
+}
+
+date_iso_seconds() {
+  if date -Iseconds >/dev/null 2>&1; then
+    date -Iseconds
+  else
+    date "+%Y-%m-%dT%H:%M:%S%z"
+  fi
+}
+
+# Detect distro from /etc/os-release
+detect_os_id() {
+  if [ -f /etc/os-release ]; then
+    # shellcheck source=/dev/null
+    . /etc/os-release
+    echo "${ID:-unknown}"
+  else
+    echo "unknown"
+  fi
+}
+
+detect_os_id_like() {
+  if [ -f /etc/os-release ]; then
+    # shellcheck source=/dev/null
+    . /etc/os-release
+    echo "${ID_LIKE:-$ID}"
+  else
+    echo "unknown"
+  fi
+}
+
+# =============================================================================
+# DIRECTORIES
+# =============================================================================
+
+PDRX_HOME="${PDRX_HOME:-$HOME/.pdrx}"
+PDRX_CONFIG="$PDRX_HOME/config"
+PDRX_BACKUP="$PDRX_HOME/backups"
+PDRX_STATE="$PDRX_HOME/state"
+PACKAGES_CONF="$PDRX_CONFIG/packages.conf"      # declarative: pm:package
+DOTFILES_DIR="$PDRX_CONFIG/dotfiles"
+TRACKED_DOTFILES="$PDRX_STATE/tracked-dotfiles"
+DESKTOP_EXPORT="$PDRX_CONFIG/desktop-export"
+GENERATIONS_FILE="$PDRX_STATE/generations"
+
+# =============================================================================
+# PACKAGE MANAGER REGISTRY
+# =============================================================================
+
+# Returns space-separated list of available PMs
+detect_available_pms() {
+  local pms=""
+  command -v apt-get >/dev/null 2>&1     && pms="$pms apt"
+  command -v dnf     >/dev/null 2>&1     && pms="$pms dnf"
+  command -v yum     >/dev/null 2>&1     && pms="$pms yum"
+  command -v pacman  >/dev/null 2>&1     && pms="$pms pacman"
+  command -v zypper  >/dev/null 2>&1     && pms="$pms zypper"
+  command -v brew    >/dev/null 2>&1     && pms="$pms brew"
+  command -v flatpak >/dev/null 2>&1     && pms="$pms flatpak"
+  command -v snap    >/dev/null 2>&1     && pms="$pms snap"
+  command -v cargo   >/dev/null 2>&1     && pms="$pms cargo"
+  echo "$pms" | sed 's/^ *//;s/ *$//'
+}
+
+# Check if PM is available
+pm_available() {
+  local pm="$1"
+  case "$pm" in
+    apt)    command -v apt-get >/dev/null 2>&1 ;;
+    dnf)    command -v dnf     >/dev/null 2>&1 ;;
+    yum)    command -v yum     >/dev/null 2>&1 ;;
+    pacman) command -v pacman  >/dev/null 2>&1 ;;
+    zypper) command -v zypper  >/dev/null 2>&1 ;;
+    brew)   command -v brew    >/dev/null 2>&1 ;;
+    flatpak) command -v flatpak >/dev/null 2>&1 ;;
+    snap)   command -v snap    >/dev/null 2>&1 ;;
+    cargo)  command -v cargo   >/dev/null 2>&1 ;;
+    *)      return 1 ;;
+  esac
+}
+
+# List installed packages for a given PM (one package per line, name only)
+pm_list_installed() {
+  local pm="$1"
+  case "$pm" in
+    apt)
+      dpkg-query -f '${Package}\n' -W 2>/dev/null || apt list --installed 2>/dev/null | awk -F/ 'NR>1 {print $1}' | sort -u
+      ;;
+    dnf|yum)
+      $pm list installed 2>/dev/null | awk 'NR>1 {print $1}' | sed 's/\..*$//'
+      ;;
+    pacman)
+      pacman -Qq 2>/dev/null
+      ;;
+    zypper)
+      zypper -q packages --installed-only 2>/dev/null | awk -F'|' 'NR>3 {gsub(/^ +| +$/,"",$3); if($3!="" && $3!="Name") print $3}'
+      ;;
+    brew)
+      brew list --formula 2>/dev/null; brew list --cask 2>/dev/null
+      ;;
+    flatpak)
+      flatpak list --app --columns=application 2>/dev/null || flatpak list --app 2>/dev/null | awk '{print $1}'
+      ;;
+    snap)
+      snap list 2>/dev/null | awk 'NR>1 {print $1}'
+      ;;
+    cargo)
+      cargo install --list 2>/dev/null | grep '^[a-z]' | sed 's/:$//' | awk '{print $1}'
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+# Search for package (returns availability per PM)
+pm_search() {
+  local term="$1"
+  local pm="$2"
+  case "$pm" in
+    apt)
+      apt-cache search "$term" 2>/dev/null | head -20
+      ;;
+    dnf|yum)
+      $pm search "$term" 2>/dev/null | head -20
+      ;;
+    pacman)
+      pacman -Ss "$term" 2>/dev/null | grep -E '^[a-z]' | head -20
+      ;;
+    zypper)
+      zypper search "$term" 2>/dev/null | head -20
+      ;;
+    brew)
+      brew search "$term" 2>/dev/null | head -20
+      ;;
+    flatpak)
+      flatpak search "$term" 2>/dev/null | head -20
+      ;;
+    snap)
+      snap search "$term" 2>/dev/null | head -20
+      ;;
+    cargo)
+      cargo search "$term" 2>/dev/null | head -20
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+# Install package with given PM
+pm_install() {
+  local pm="$1"
+  local pkg="$2"
+  case "$pm" in
+    apt)    sudo apt-get install -y "$pkg" ;;
+    dnf)    sudo dnf install -y "$pkg" ;;
+    yum)    sudo yum install -y "$pkg" ;;
+    pacman) sudo pacman -S --noconfirm "$pkg" ;;
+    zypper) sudo zypper install -y "$pkg" ;;
+    brew)   brew install "$pkg" ;;
+    flatpak)
+      if flatpak remotes 2>/dev/null | grep -q flathub; then
+        flatpak install -y flathub "$pkg"
+      else
+        flatpak install -y "$pkg"
+      fi
+      ;;
+    snap)   sudo snap install "$pkg" ;;
+    cargo)  cargo install "$pkg" ;;
+    *)      return 1 ;;
+  esac
+}
+
+# Remove package with given PM
+pm_remove() {
+  local pm="$1"
+  local pkg="$2"
+  case "$pm" in
+    apt)    sudo apt-get remove -y "$pkg" ;;
+    dnf)    sudo dnf remove -y "$pkg" ;;
+    yum)    sudo yum remove -y "$pkg" ;;
+    pacman) sudo pacman -R --noconfirm "$pkg" ;;
+    zypper) sudo zypper remove -y "$pkg" ;;
+    brew)   brew uninstall "$pkg" ;;
+    flatpak) flatpak uninstall -y "$pkg" ;;
+    snap)   sudo snap remove "$pkg" ;;
+    cargo)  cargo uninstall "$pkg" ;;
+    *)      return 1 ;;
+  esac
+}
+
+# Check if package is installed
+pm_is_installed() {
+  local pm="$1"
+  local pkg="$2"
+  case "$pm" in
+    apt)
+      dpkg -l "$pkg" 2>/dev/null | grep -q '^ii'
+      ;;
+    dnf|yum)
+      $pm list installed "$pkg" 2>/dev/null | grep -q .
+      ;;
+    pacman)
+      pacman -Q "$pkg" 2>/dev/null
+      ;;
+    zypper)
+      zypper packages --installed-only 2>/dev/null | grep -q "$pkg"
+      ;;
+    brew)
+      brew list "$pkg" 2>/dev/null
+      ;;
+    flatpak)
+      flatpak list | grep -q "$pkg"
+      ;;
+    snap)
+      snap list 2>/dev/null | grep -q "^$pkg "
+      ;;
+    cargo)
+      cargo install --list 2>/dev/null | grep -q "^$pkg "
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+# Update package index/cache for PM
+pm_update() {
+  local pm="$1"
+  case "$pm" in
+    apt)    sudo apt-get update ;;
+    dnf)    sudo dnf check-update || true ;;
+    yum)    sudo yum check-update || true ;;
+    pacman) sudo pacman -Sy ;;
+    zypper) sudo zypper refresh ;;
+    brew)   brew update ;;
+    flatpak) flatpak update --appstream ;;
+    snap)   sudo snap refresh ;;
+    cargo)  true ;; # no index update
+    *)      return 1 ;;
+  esac
+}
+
+# =============================================================================
+# DESKTOP ENVIRONMENT
+# =============================================================================
+
+get_desktop_id() {
+  local xdg="${XDG_CURRENT_DESKTOP:-}"
+  local gdm="${GDMSESSION:-}"
+  [ "$(uname -s)" = "Darwin" ] && { echo "macos"; return; }
+  case "${xdg}${gdm}" in
+    *[Hh][Yy][Pp][Rr]*) echo "hyprland"; return ;;
+    *[Gg][Nn][Oo][Mm][Ee]*) echo "gnome"; return ;;
+    *[Pp][Ll][Aa][Ss][Mm][Aa]*|*[Kk][Dd][Ee]*) echo "kde"; return ;;
+    *[Xx][Ff][Cc][Ee]*) echo "xfce"; return ;;
+    *[Ss][Ww][Aa][Yy]*) echo "sway"; return ;;
+    *[Ii]3*) echo "i3"; return ;;
+  esac
+  [ "${XDG_SESSION_TYPE:-}" = "wayland" ] && [ -n "${WAYLAND_DISPLAY:-}" ] && { echo "wayland"; return; }
+  echo "unknown"
+}
+
+export_desktop_common() {
+  local out="$1"
+  mkdir -p "$out/common"
+  [ -f "$HOME/.config/mimeapps.list" ] && cp "$HOME/.config/mimeapps.list" "$out/common/" 2>/dev/null || true
+  [ -f "$HOME/.config/user-dirs.dirs" ] && cp "$HOME/.config/user-dirs.dirs" "$out/common/" 2>/dev/null || true
+  [ -f "$HOME/.config/user-dirs.locale" ] && cp "$HOME/.config/user-dirs.locale" "$out/common/" 2>/dev/null || true
+  [ -d "$HOME/.config/fontconfig" ] && cp -R "$HOME/.config/fontconfig" "$out/common/" 2>/dev/null || true
+  [ -f "$HOME/.Xresources" ] && cp "$HOME/.Xresources" "$out/common/" 2>/dev/null || true
+  [ -f "$HOME/.xinitrc" ] && cp "$HOME/.xinitrc" "$out/common/" 2>/dev/null || true
+  [ -f "$HOME/.xsession" ] && cp "$HOME/.xsession" "$out/common/" 2>/dev/null || true
+  [ -d "$HOME/.local/share/applications" ] && cp -R "$HOME/.local/share/applications" "$out/common/" 2>/dev/null || true
+}
+
+export_desktop_state() {
+  local out="${DESKTOP_EXPORT}"
+  local de="${1:-$(get_desktop_id)}"
+  mkdir -p "$out"
+  case "$de" in
+    gnome)
+      if command -v dconf >/dev/null 2>&1; then
+        mkdir -p "$out/dconf"
+        dconf dump / > "$out/dconf/user.txt" 2>/dev/null || true
+      fi
+      if command -v gsettings >/dev/null 2>&1; then
+        mkdir -p "$out/gsettings"
+        for schema in $(gsettings list-schemas 2>/dev/null); do
+          gsettings list-recursively "$schema" 2>/dev/null > "$out/gsettings/${schema}.txt" || true
+        done
+        gsettings get org.gnome.shell enabled-extensions 2>/dev/null > "$out/gnome-enabled-extensions.txt" || true
+      fi
+      [ -d "$HOME/.config/gnome" ] && cp -R "$HOME/.config/gnome" "$out/" 2>/dev/null || true
+      [ -d "$HOME/.config/gnome-shell" ] && cp -R "$HOME/.config/gnome-shell" "$out/" 2>/dev/null || true
+      [ -d "$HOME/.config/gtk-3.0" ] && cp -R "$HOME/.config/gtk-3.0" "$out/" 2>/dev/null || true
+      [ -d "$HOME/.config/gtk-4.0" ] && cp -R "$HOME/.config/gtk-4.0" "$out/" 2>/dev/null || true
+      [ -d "$HOME/.local/share/gnome-shell/extensions" ] && cp -R "$HOME/.local/share/gnome-shell/extensions" "$out/gnome-shell-extensions" 2>/dev/null || true
+      ;;
+    kde)
+      mkdir -p "$out/.config" "$out/.local/share"
+      for item in .config/kdeglobals .config/kwinrc .config/krunnerrc; do
+        [ -e "$HOME/$item" ] && cp -R "$HOME/$item" "$out/.config/" 2>/dev/null || true
+      done
+      for item in "$HOME/.config"/plasma* "$HOME/.config"/kwin*; do
+        [ -e "$item" ] && cp -R "$item" "$out/.config/" 2>/dev/null || true
+      done
+      [ -d "$HOME/.local/share/kwin" ] && cp -R "$HOME/.local/share/kwin" "$out/.local/share/" 2>/dev/null || true
+      [ -d "$HOME/.local/share/plasma" ] && cp -R "$HOME/.local/share/plasma" "$out/.local/share/" 2>/dev/null || true
+      ;;
+    xfce)
+      [ -d "$HOME/.config/xfce4" ] && cp -R "$HOME/.config/xfce4" "$out/" 2>/dev/null || true
+      [ -d "$HOME/.config/Thunar" ] && cp -R "$HOME/.config/Thunar" "$out/" 2>/dev/null || true
+      ;;
+    i3)
+      mkdir -p "$out/i3"
+      [ -f "$HOME/.config/i3/config" ] && cp "$HOME/.config/i3/config" "$out/i3/config" 2>/dev/null || true
+      [ -d "$HOME/.config/i3status" ] && cp -R "$HOME/.config/i3status" "$out/" 2>/dev/null || true
+      [ -d "$HOME/.config/i3blocks" ] && cp -R "$HOME/.config/i3blocks" "$out/" 2>/dev/null || true
+      ;;
+    sway)
+      mkdir -p "$out/sway"
+      [ -f "$HOME/.config/sway/config" ] && cp "$HOME/.config/sway/config" "$out/sway/config" 2>/dev/null || true
+      [ -d "$HOME/.config/waybar" ] && cp -R "$HOME/.config/waybar" "$out/" 2>/dev/null || true
+      [ -d "$HOME/.config/swaync" ] && cp -R "$HOME/.config/swaync" "$out/" 2>/dev/null || true
+      [ -d "$HOME/.config/foot" ] && cp -R "$HOME/.config/foot" "$out/" 2>/dev/null || true
+      ;;
+    hyprland)
+      [ -d "$HOME/.config/hypr" ] && cp -R "$HOME/.config/hypr" "$out/" 2>/dev/null || true
+      [ -d "$HOME/.config/waybar" ] && cp -R "$HOME/.config/waybar" "$out/" 2>/dev/null || true
+      [ -d "$HOME/.config/wofi" ] && cp -R "$HOME/.config/wofi" "$out/" 2>/dev/null || true
+      ;;
+    *) ;;
+  esac
+  export_desktop_common "$out"
+  echo "$de" > "$out/current-desktop.txt"
+}
+
+restore_desktop_common() {
+  local out="$1"
+  [ ! -d "$out/common" ] && return 0
+  mkdir -p "$HOME/.config" "$HOME/.local/share"
+  [ -f "$out/common/mimeapps.list" ] && cp "$out/common/mimeapps.list" "$HOME/.config/" 2>/dev/null || true
+  [ -f "$out/common/user-dirs.dirs" ] && cp "$out/common/user-dirs.dirs" "$HOME/.config/" 2>/dev/null || true
+  [ -f "$out/common/user-dirs.locale" ] && cp "$out/common/user-dirs.locale" "$HOME/.config/" 2>/dev/null || true
+  [ -d "$out/common/fontconfig" ] && cp -R "$out/common/fontconfig" "$HOME/.config/" 2>/dev/null || true
+  [ -f "$out/common/.Xresources" ] && cp "$out/common/.Xresources" "$HOME/" 2>/dev/null || true
+  [ -f "$out/common/.xinitrc" ] && cp "$out/common/.xinitrc" "$HOME/" 2>/dev/null || true
+  [ -f "$out/common/.xsession" ] && cp "$out/common/.xsession" "$HOME/" 2>/dev/null || true
+  [ -d "$out/common/applications" ] && cp -R "$out/common/applications" "$HOME/.local/share/" 2>/dev/null || true
+}
+
+restore_desktop_state() {
+  local out="${DESKTOP_EXPORT}"
+  [ ! -f "$out/current-desktop.txt" ] && return 0
+  local de
+  de=$(cat "$out/current-desktop.txt")
+  restore_desktop_common "$out"
+  case "$de" in
+    gnome)
+      [ -f "$out/dconf/user.txt" ] && command -v dconf >/dev/null 2>&1 && dconf load / < "$out/dconf/user.txt" 2>/dev/null || true
+      [ -d "$out/gnome" ] && cp -R "$out/gnome" "$HOME/.config/" 2>/dev/null || true
+      [ -d "$out/gnome-shell" ] && cp -R "$out/gnome-shell" "$HOME/.config/" 2>/dev/null || true
+      [ -d "$out/gtk-3.0" ] && cp -R "$out/gtk-3.0" "$HOME/.config/" 2>/dev/null || true
+      [ -d "$out/gtk-4.0" ] && cp -R "$out/gtk-4.0" "$HOME/.config/" 2>/dev/null || true
+      [ -d "$out/gnome-shell-extensions" ] && mkdir -p "$HOME/.local/share/gnome-shell" && cp -R "$out/gnome-shell-extensions" "$HOME/.local/share/gnome-shell/extensions" 2>/dev/null || true
+      ;;
+    kde)
+      [ -d "$out/.config" ] && cp -R "$out/.config/"* "$HOME/.config/" 2>/dev/null || true
+      [ -d "$out/.local" ] && cp -R "$out/.local/"* "$HOME/.local/" 2>/dev/null || true
+      ;;
+    xfce)
+      [ -d "$out/xfce4" ] && cp -R "$out/xfce4" "$HOME/.config/" 2>/dev/null || true
+      [ -d "$out/Thunar" ] && cp -R "$out/Thunar" "$HOME/.config/" 2>/dev/null || true
+      ;;
+    i3)
+      [ -f "$out/i3/config" ] && mkdir -p "$HOME/.config/i3" && cp "$out/i3/config" "$HOME/.config/i3/config" 2>/dev/null || true
+      [ -d "$out/i3status" ] && cp -R "$out/i3status" "$HOME/.config/" 2>/dev/null || true
+      [ -d "$out/i3blocks" ] && cp -R "$out/i3blocks" "$HOME/.config/" 2>/dev/null || true
+      ;;
+    sway)
+      [ -f "$out/sway/config" ] && mkdir -p "$HOME/.config/sway" && cp "$out/sway/config" "$HOME/.config/sway/config" 2>/dev/null || true
+      [ -d "$out/waybar" ] && cp -R "$out/waybar" "$HOME/.config/" 2>/dev/null || true
+      [ -d "$out/swaync" ] && cp -R "$out/swaync" "$HOME/.config/" 2>/dev/null || true
+      [ -d "$out/foot" ] && cp -R "$out/foot" "$HOME/.config/" 2>/dev/null || true
+      ;;
+    hyprland)
+      [ -d "$out/hypr" ] && cp -R "$out/hypr" "$HOME/.config/" 2>/dev/null || true
+      [ -d "$out/waybar" ] && cp -R "$out/waybar" "$HOME/.config/" 2>/dev/null || true
+      [ -d "$out/wofi" ] && cp -R "$out/wofi" "$HOME/.config/" 2>/dev/null || true
+      ;;
+    *) ;;
+  esac
+}
+
+# =============================================================================
+# LOGGING
+# =============================================================================
+
+RED=''; GREEN=''; YELLOW=''; BLUE=''; CYAN=''; BOLD=''; NC=''
+[ -t 1 ] && RED='\033[0;31m' GREEN='\033[0;32m' YELLOW='\033[1;33m' BLUE='\033[0;34m' CYAN='\033[0;36m' BOLD='\033[1m' NC='\033[0m'
+
+log_info()    { echo -e "${BLUE}[INFO]${NC} $*"; }
+log_success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
+log_warning() { echo -e "${YELLOW}[WARNING]${NC} $*"; }
+log_error()   { echo -e "${RED}[ERROR]${NC} $*" >&2; }
+log_header()  { echo -e "\n${BOLD}${CYAN}━━━ $* ━━━${NC}\n"; }
+
+# =============================================================================
+# INIT & STATE
+# =============================================================================
+
+is_initialized() {
+  [ -f "$PDRX_STATE/initialized" ] && return 0
+  return 1
+}
+
+require_initialized() {
+  if ! is_initialized; then
+    log_error "pdrx is not initialized. Run: pdrx init"
+    exit 1
+  fi
+}
+
+mark_initialized() {
+  mkdir -p "$PDRX_CONFIG" "$PDRX_BACKUP" "$PDRX_STATE" "$DOTFILES_DIR"
+  touch "$PACKAGES_CONF" 2>/dev/null || true
+  touch "$TRACKED_DOTFILES" 2>/dev/null || true
+  date_iso_seconds > "$PDRX_STATE/initialized"
+  echo "$VERSION" > "$PDRX_STATE/version"
+  detect_os_id > "$PDRX_STATE/os-id"
+}
+
+# Load packages from declarative config into associative array (bash 4+)
+# Fallback: use temp file for compatibility
+load_packages_conf() {
+  [ -f "$PACKAGES_CONF" ] || return 0
+  grep -v '^#' "$PACKAGES_CONF" | grep -v '^$' | sort -u
+}
+
+# Append package with PM - records HOW it was added for reproducible restore
+append_packages_conf() {
+  local pm="$1"
+  shift
+  for pkg in "$@"; do
+    local line="$pm:$pkg"
+    if ! grep -qFx "$line" "$PACKAGES_CONF" 2>/dev/null; then
+      echo "$line" >> "$PACKAGES_CONF"
+    fi
+  done
+}
+
+# Remove package from config - same PM used for uninstall as was recorded
+remove_from_packages_conf() {
+  local pm="$1"
+  shift
+  for pkg in "$@"; do
+    local line="$pm:$pkg"
+    [ -f "$PACKAGES_CONF" ] && grep -vFx "$line" "$PACKAGES_CONF" > "${PACKAGES_CONF}.tmp" && mv "${PACKAGES_CONF}.tmp" "$PACKAGES_CONF"
+  done
+}
+
+# =============================================================================
+# COMMANDS
+# =============================================================================
+
+run_init() {
+  log_header "Initialize pdrx"
+  if is_initialized; then
+    log_info "Already initialized at $PDRX_HOME"
+  else
+    mark_initialized
+    log_success "Initialized pdrx at $PDRX_HOME"
+    run_sync_desktop 2>/dev/null || true
+  fi
+  local pms
+  pms=$(detect_available_pms)
+  log_info "Available package managers: $pms"
+}
+
+run_status() {
+  require_initialized
+  log_header "pdrx Status"
+  echo "Config:     $PDRX_CONFIG"
+  echo "Backups:    $PDRX_BACKUP"
+  echo "OS:         $(detect_os_id) ($(detect_os_id_like))"
+  echo "Desktop:    $(get_desktop_id)"
+  echo "PMs:        $(detect_available_pms)"
+  echo "Packages:   $(wc -l < "$PACKAGES_CONF" 2>/dev/null || echo 0) in declarative config"
+  echo "Backups:    $(find "$PDRX_BACKUP" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)"
+}
+
+run_install() {
+  require_initialized
+  local pkgs=("$@")
+  [ ${#pkgs[@]} -eq 0 ] && { log_error "Usage: pdrx install <pkg> [pkg...]"; exit 1; }
+
+  local pms
+  read -ra pms <<< "$(detect_available_pms)"
+  [ ${#pms[@]} -eq 0 ] && { log_error "No package managers found."; exit 1; }
+
+  for pkg in "${pkgs[@]}"; do
+    log_header "Install: $pkg"
+    if [ ${#pms[@]} -eq 1 ]; then
+      pm="${pms[0]}"
+      log_info "Using $pm (only PM available)"
+    else
+      echo "Select package manager for '$pkg':"
+      local i=1
+      for pm in "${pms[@]}"; do
+        echo "  $i) $pm"
+        i=$((i+1))
+      done
+      printf "Choice [1-%d]: " ${#pms[@]}
+      read -r choice
+      choice=${choice:-1}
+      pm="${pms[$((choice-1))]}"
+    fi
+
+    if pm_available "$pm"; then
+      pm_install "$pm" "$pkg" && append_packages_conf "$pm" "$pkg" && log_success "Installed $pkg via $pm"
+    else
+      log_error "PM $pm not available"
+    fi
+  done
+}
+
+run_install_with_pm() {
+  require_initialized
+  local pm="$1"
+  shift
+  local pkgs=("$@")
+  [ ${#pkgs[@]} -eq 0 ] && { log_error "Usage: pdrx install --pm <pm> <pkg> [pkg...]"; exit 1; }
+  pm_available "$pm" || { log_error "PM $pm not available"; exit 1; }
+  for pkg in "${pkgs[@]}"; do
+    pm_install "$pm" "$pkg" && append_packages_conf "$pm" "$pkg" && log_success "Installed $pkg via $pm"
+  done
+}
+
+run_remove() {
+  require_initialized
+  local pkgs=("$@")
+  [ ${#pkgs[@]} -eq 0 ] && { log_error "Usage: pdrx remove <pkg> [pkg...]"; exit 1; }
+
+  for pkg in "${pkgs[@]}"; do
+    local line
+    line=$(grep ":$pkg$" "$PACKAGES_CONF" 2>/dev/null | head -1)
+    if [ -n "$line" ]; then
+      local pm="${line%%:*}"
+      log_info "Removing $pkg (from $pm)"
+      pm_remove "$pm" "$pkg" 2>/dev/null || true
+      remove_from_packages_conf "$pm" "$pkg"
+      log_success "Removed $pkg"
+    else
+      log_warning "Package $pkg not in declarative config. Checking all PMs..."
+      for pm in $(detect_available_pms); do
+        if pm_is_installed "$pm" "$pkg" 2>/dev/null; then
+          pm_remove "$pm" "$pkg" && remove_from_packages_conf "$pm" "$pkg" && log_success "Removed $pkg from $pm"
+          break
+        fi
+      done
+    fi
+  done
+}
+
+run_list() {
+  require_initialized
+  log_header "Installed packages (declarative config)"
+  if [ -s "$PACKAGES_CONF" ]; then
+    while IFS= read -r line; do
+      [ -z "$line" ] || [[ "$line" == \#* ]] && continue
+      [[ "$line" =~ ^[a-z]+:.+ ]] || continue
+      echo "  $line"
+    done < "$PACKAGES_CONF"
+  else
+    log_info "No packages in config. Run 'pdrx sync' to capture current state."
+  fi
+}
+
+run_search() {
+  local term=""
+  local pm=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --pm) pm="${2:-}"; shift 2 ;;
+      -*) shift ;;
+      *) term="$1"; shift; break ;;
+    esac
+  done
+  [ -z "$term" ] && { log_error "Usage: pdrx search <term> [--pm PM]"; exit 1; }
+
+  local pms
+  read -ra pms <<< "$(detect_available_pms)"
+  [ ${#pms[@]} -eq 0 ] && { log_error "No package managers found."; exit 1; }
+
+  if [ -n "$pm" ]; then
+    pm_available "$pm" || { log_error "PM $pm not available"; exit 1; }
+    pm_search "$term" "$pm"
+    return
+  fi
+
+  if [ ${#pms[@]} -eq 1 ] || [ "$YES" = "true" ]; then
+    pm_search "$term" "${pms[0]}"
+  else
+    echo "Search in which PM? (or 'all')"
+    local i=1
+    for p in "${pms[@]}"; do echo "  $i) $p"; i=$((i+1)); done
+    printf "Choice: "
+    read -r choice
+    if [ "$choice" = "all" ]; then
+      for p in "${pms[@]}"; do
+        echo "--- $p ---"
+        pm_search "$term" "$p" 2>/dev/null || true
+      done
+    else
+      pm="${pms[$((choice-1))]}"
+      pm_search "$term" "$pm"
+    fi
+  fi
+}
+
+run_sync() {
+  require_initialized
+  log_header "Sync: capture system state into declarative config"
+
+  # Build current installed set with PM attribution
+  local tmp
+  tmp=$(mktemp)
+  for pm in $(detect_available_pms); do
+    pm_list_installed "$pm" 2>/dev/null | while IFS= read -r pkg; do
+      [ -n "$pkg" ] && echo "$pm:$pkg" >> "$tmp"
+    done || true
+  done
+
+  # Merge with existing (keep user additions, add newly detected)
+  if [ -f "$PACKAGES_CONF" ]; then
+    grep -E '^[a-z]+:.+' "$PACKAGES_CONF" 2>/dev/null >> "$tmp" || true
+  fi
+  sort -u "$tmp" | grep -v '^$' > "${PACKAGES_CONF}.new" || true
+  rm -f "$tmp"
+
+  # Write with header (clear add/remove/restore documentation)
+  {
+    echo "# pdrx declarative packages"
+    echo "# Format: package_manager:package_name"
+    echo "#"
+    echo "# ADD:     pdrx install <pkg> records PM used. pdrx install --pm <pm> <pkg> forces a PM."
+    echo "# REMOVE:  pdrx remove <pkg> uses the recorded PM, removes from config."
+    echo "# RESTORE: pdrx apply uses the recorded PM for each package. Same PM = reproducible."
+    echo "#"
+    echo "# Synced: $(date_iso_seconds)"
+    echo "# OS: $(detect_os_id)"
+    echo ""
+    cat "${PACKAGES_CONF}.new"
+  } > "$PACKAGES_CONF"
+  rm -f "${PACKAGES_CONF}.new"
+
+  run_sync_desktop 2>/dev/null || true
+  log_success "Synced packages and desktop state to $PACKAGES_CONF"
+}
+
+# Apply: install each package using its RECORDED package manager (reproducible restore)
+run_apply() {
+  require_initialized
+  log_header "Apply: install all packages using recorded package managers"
+
+  local count=0
+  while IFS= read -r line; do
+    [[ "$line" == \#* ]] || [ -z "$line" ] && continue
+    local pm="${line%%:*}"
+    local pkg="${line#*:}"
+    [ -z "$pm" ] || [ -z "$pkg" ] && continue
+    if pm_available "$pm" && ! pm_is_installed "$pm" "$pkg" 2>/dev/null; then
+      log_info "Installing $pkg via $pm"
+      pm_install "$pm" "$pkg" && count=$((count+1))
+    fi
+  done < "$PACKAGES_CONF"
+
+  # Deploy tracked dotfiles
+  if [ -f "$TRACKED_DOTFILES" ]; then
+    while IFS= read -r rel; do
+      [ -z "$rel" ] && continue
+      local src="$DOTFILES_DIR/$rel"
+      local dest="$HOME/$rel"
+      if [ -f "$src" ]; then
+        mkdir -p "$(dirname "$dest")"
+        cp "$src" "$dest"
+        log_info "Deployed dotfile: $rel"
+      fi
+    done < "$TRACKED_DOTFILES"
+  fi
+
+  run_restore_desktop 2>/dev/null || true
+  log_success "Applied: installed $count new package(s)"
+}
+
+run_sync_desktop() {
+  require_initialized
+  export_desktop_state
+  log_success "Exported desktop state to $DESKTOP_EXPORT"
+}
+
+run_restore_desktop() {
+  require_initialized
+  restore_desktop_state
+  log_success "Restored desktop state from $DESKTOP_EXPORT"
+}
+
+run_track() {
+  require_initialized
+  for f in "$@"; do
+    local abs
+    abs=$(cd "$(dirname "$f")" 2>/dev/null && pwd)/$(basename "$f")
+    [ -f "$abs" ] || abs="$HOME/$f"
+    [ -f "$abs" ] || { log_error "File not found: $f"; continue; }
+    local rel="${abs#"$HOME"/}"
+    local dest="$DOTFILES_DIR/$rel"
+    mkdir -p "$(dirname "$dest")"
+    cp "$abs" "$dest"
+    grep -qFx "$rel" "$TRACKED_DOTFILES" 2>/dev/null || echo "$rel" >> "$TRACKED_DOTFILES"
+    # Symlink back so edits go to tracked copy (optional: user can choose)
+    ln -sf "$dest" "$abs" 2>/dev/null || true
+    log_success "Tracking $rel"
+  done
+}
+
+run_untrack() {
+  require_initialized
+  for f in "$@"; do
+    local rel="${f#"$HOME"/}"
+    [[ "$rel" == "$f" ]] && rel="$f"
+    [ -f "$TRACKED_DOTFILES" ] && grep -vFx "$rel" "$TRACKED_DOTFILES" > "${TRACKED_DOTFILES}.tmp" && mv "${TRACKED_DOTFILES}.tmp" "$TRACKED_DOTFILES"
+    local dest="$DOTFILES_DIR/$rel"
+    [ -f "$dest" ] && rm -f "$dest"
+    log_success "Untracked $rel"
+  done
+}
+
+run_backup() {
+  require_initialized
+  local label="${1:-manual}"
+  local ts
+  ts=$(date +%Y%m%d_%H%M%S)
+  local dir="$PDRX_BACKUP/${ts}_${label}"
+  mkdir -p "$dir"
+  cp "$PACKAGES_CONF" "$dir/packages.conf"
+  [ -d "$DESKTOP_EXPORT" ] && cp -R "$DESKTOP_EXPORT" "$dir/desktop-export"
+  [ -d "$DOTFILES_DIR" ] && cp -R "$DOTFILES_DIR" "$dir/dotfiles"
+  [ -f "$TRACKED_DOTFILES" ] && cp "$TRACKED_DOTFILES" "$dir/tracked-dotfiles"
+  echo "$ts" >> "$GENERATIONS_FILE"
+  log_success "Backup: $dir"
+}
+
+run_restore() {
+  require_initialized
+  local path="$1"
+  [ -z "$path" ] && { log_error "Usage: pdrx restore <backup-path>"; exit 1; }
+  [ ! -d "$path" ] && { log_error "Not found: $path"; exit 1; }
+
+  [ "$DRY_RUN" = "true" ] && { log_info "[dry-run] Would restore from $path"; return 0; }
+  [ "$YES" != "true" ] && { printf "Restore from %s? [y/N]: " "$path"; read -r r; [ "$r" != "y" ] && [ "$r" != "Y" ] && return 0; }
+
+  [ -f "$path/packages.conf" ] && cp "$path/packages.conf" "$PACKAGES_CONF"
+  [ -d "$path/desktop-export" ] && rm -rf "$DESKTOP_EXPORT" && cp -R "$path/desktop-export" "$DESKTOP_EXPORT"
+  [ -d "$path/dotfiles" ] && rm -rf "$DOTFILES_DIR" && cp -R "$path/dotfiles" "$DOTFILES_DIR"
+  [ -f "$path/tracked-dotfiles" ] && cp "$path/tracked-dotfiles" "$TRACKED_DOTFILES"
+  log_success "Restored from $path"
+}
+
+run_generations() {
+  require_initialized
+  log_header "Generations (backups)"
+  if [ -d "$PDRX_BACKUP" ] && [ -n "$(ls -A "$PDRX_BACKUP" 2>/dev/null)" ]; then
+    # Backup dirs are timestamp_label format - no special chars
+    # shellcheck disable=SC2045
+    for d in $(ls -1t "$PDRX_BACKUP" 2>/dev/null); do
+      [ -n "$d" ] && echo "  $PDRX_BACKUP/$d"
+    done
+  else
+    log_info "No backups yet."
+  fi
+}
+
+run_rollback() {
+  require_initialized
+  local n="${1:-1}"
+  local dir
+  # shellcheck disable=SC2012
+  dir=$(ls -1t "$PDRX_BACKUP" 2>/dev/null | sed -n "${n}p")
+  [ -z "$dir" ] && { log_error "No backup #$n"; exit 1; }
+  run_restore "$PDRX_BACKUP/$dir"
+}
+
+run_export() {
+  require_initialized
+  local out="${1:-}"
+  if [ -n "$out" ]; then
+    tar -czf "$out" -C "$PDRX_HOME" config state 2>/dev/null || tar -czf "$out" -C "$PDRX_CONFIG" . 2>/dev/null
+    log_success "Exported to $out"
+  else
+    tar -czf - -C "$PDRX_HOME" config state 2>/dev/null || tar -czf - -C "$PDRX_CONFIG" .
+  fi
+}
+
+run_import() {
+  require_initialized
+  local file="$1"
+  [ -z "$file" ] && { log_error "Usage: pdrx import <file>"; exit 1; }
+  [ ! -f "$file" ] && { log_error "Not found: $file"; exit 1; }
+  tar -xzf "$file" -C "$PDRX_HOME" 2>/dev/null || tar -xzf "$file" -C "$PDRX_CONFIG" 2>/dev/null
+  log_success "Imported from $file"
+}
+
+run_update() {
+  require_initialized
+  for pm in $(detect_available_pms); do
+    log_info "Updating $pm..."
+    pm_update "$pm" 2>/dev/null || log_warning "Update failed for $pm"
+  done
+  log_success "Package indexes updated"
+}
+
+run_destroy() {
+  log_header "Destroy pdrx"
+  echo "This will remove:"
+  echo "  • $PDRX_HOME (config, backups, state)"
+  echo "  • pdrx from ~/.local/bin"
+  echo ""
+  echo "Installed packages will NOT be uninstalled."
+  echo ""
+  [ "$YES" != "true" ] && { printf "Type 'yes' to continue: "; read -r r; [ "$r" != "yes" ] && return 0; }
+
+  rm -rf "$PDRX_HOME"
+  [ -f "$HOME/.local/bin/pdrx" ] && rm -f "$HOME/.local/bin/pdrx"
+  # Remove PATH block
+  for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
+    if [ -f "$rc" ]; then
+      # Intentionally match literal $PATH and $HOME as written in file
+      # shellcheck disable=SC2016
+      grep -v -F '# Added by pdrx' "$rc" | grep -v -F 'export PATH="$PATH:$HOME/.local/bin"' > "${rc}.tmp" 2>/dev/null && mv "${rc}.tmp" "$rc"
+    fi
+  done
+  log_success "pdrx destroyed."
+}
+
+run_install_self() {
+  log_header "Install pdrx"
+  local install_dir="$HOME/.local/bin"
+  local self
+  self="$(get_script_path)"
+  [ -f "$self" ] || self="$(cd "$(dirname "$0")" && pwd)/pdrx"
+  mkdir -p "$install_dir"
+  cp "$self" "$install_dir/pdrx"
+  chmod +x "$install_dir/pdrx"
+  local path_line="export PATH=\"\$PATH:\$HOME/.local/bin\""
+  for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
+    if [ -f "$rc" ]; then
+      if grep -q '\.local/bin' "$rc"; then
+        :
+      else
+        printf '\n# Added by pdrx\n%s\n' "$path_line" >> "$rc"
+      fi
+    fi
+  done
+  log_success "Installed to $install_dir/pdrx. Run: source ~/.bashrc && pdrx init"
+}
+
+# =============================================================================
+# HELP
+# =============================================================================
+
+show_help() {
+  cat << EOF
+${BOLD}${CYAN}pdrx v${VERSION} - Portable Dynamic Reproducible X${NC}
+Pure Bash reproducible system setup. No Nix. Works on all major Linux distros.
+
+${BOLD}USAGE:${NC} pdrx [OPTIONS] COMMAND [ARGS...]
+
+${BOLD}OPTIONS:${NC}
+  -h, --help       Show this help
+  -v, --version    Show version
+  -q, --quiet      Less output
+  -d, --debug      Verbose
+  -y, --yes        No confirmation prompts
+  -n, --dry-run    Show what would be done
+  -c, --config DIR Use DIR as config (default: ~/.pdrx)
+  --install        Install pdrx to ~/.local/bin
+
+${BOLD}COMMANDS:${NC}
+  init             Initialize pdrx
+  status           Show status (config, PMs, packages)
+  install [pkg...] Install package(s), choose PM interactively
+  install --pm PM [pkg...]  Install with specific PM (apt|dnf|brew|flatpak|snap|cargo...)
+  remove [pkg...]  Remove package(s) and update config
+  list             List packages in declarative config
+  search TERM      Search for packages
+  sync             Sync current system state into declarative config
+  apply            Apply declarative config (install all)
+  track FILE       Track dotfile
+  untrack FILE     Untrack dotfile
+  backup [LABEL]   Create backup
+  restore PATH     Restore from backup
+  generations      List backups (generations)
+  rollback [N]     Rollback to backup N
+  sync-desktop     Export desktop/DE state
+  sync-desktop --restore  Restore desktop state
+  update           Update all package manager indexes
+  export [FILE]    Export config (tarball)
+  import FILE      Import config
+  destroy          Remove pdrx (use -y to skip prompt)
+
+${BOLD}SUPPORTED PACKAGE MANAGERS:${NC}
+  apt, dnf, yum, pacman, zypper, brew, flatpak, snap, cargo
+
+${BOLD}DECLARATIVE FORMAT:${NC}
+  packages.conf: one line per package: package_manager:package_name
+  Example: apt:vim  flatpak:org.gnome.GIMP  cargo:ripgrep
+
+EOF
+}
+
+show_version() {
+  echo "pdrx ${VERSION}"
+}
+
+# =============================================================================
+# MAIN
+# =============================================================================
+
+# shellcheck disable=SC2034
+QUIET=false
+# shellcheck disable=SC2034
+DEBUG=false
+YES=false
+DRY_RUN=false
+
+# Parse global options
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help)    show_help; exit 0 ;;
+    -v|--version) show_version; exit 0 ;;
+    -q|--quiet)   QUIET=true; shift ;;
+    -d|--debug)   DEBUG=true; shift ;;
+    -y|--yes)     YES=true; shift ;;
+    -n|--dry-run) DRY_RUN=true; shift ;;
+    -c|--config)  PDRX_HOME="$2"; shift 2 ;;
+    --install)    run_install_self; exit 0 ;;
+    *)            break ;;
+  esac
+done
+
+[ $# -eq 0 ] && { show_help; exit 0; }
+
+CMD="$1"
+shift
+
+case "$CMD" in
+  init)           run_init "$@" ;;
+  status)         run_status "$@" ;;
+  install)
+    if [ "${1:-}" = "--pm" ]; then
+      shift
+      run_install_with_pm "$@"
+    else
+      run_install "$@"
+    fi
+    ;;
+  remove)         run_remove "$@" ;;
+  list)           run_list "$@" ;;
+  search)         run_search "$@" ;;
+  sync)           run_sync "$@" ;;
+  apply)          run_apply "$@" ;;
+  track)          run_track "$@" ;;
+  untrack)        run_untrack "$@" ;;
+  backup)         run_backup "$@" ;;
+  restore)        run_restore "$@" ;;
+  generations)    run_generations "$@" ;;
+  rollback)       run_rollback "$@" ;;
+  sync-desktop)
+    if [ "${1:-}" = "--restore" ]; then
+      run_restore_desktop
+    else
+      run_sync_desktop
+    fi
+    ;;
+  update)         run_update "$@" ;;
+  export)         run_export "$@" ;;
+  import)         run_import "$@" ;;
+  destroy)        run_destroy "$@" ;;
+  *)
+    log_error "Unknown command: $CMD"
+    show_help
+    exit 1
+    ;;
+esac
