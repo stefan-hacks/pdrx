@@ -10,7 +10,7 @@
 
 set -euo pipefail
 
-VERSION="1.0.0"
+VERSION="1.4.7"
 
 # =============================================================================
 # PORTABLE HELPERS (POSIX + Bash, works on all Linux)
@@ -371,6 +371,30 @@ pm_update() {
     flatpak) flatpak update --appstream ;;
     snap)   sudo snap refresh ;;
     cargo)  true ;; # no index update
+    *)      return 1 ;;
+  esac
+}
+
+# Upgrade all packages for PM
+pm_upgrade() {
+  local pm="$1"
+  case "$pm" in
+    apt)    sudo apt-get upgrade -y ;;
+    dnf)    sudo dnf upgrade -y ;;
+    yum)    sudo yum update -y ;;
+    pacman) sudo pacman -Su --noconfirm ;;
+    zypper) sudo zypper update -y ;;
+    brew)   brew upgrade ;;
+    flatpak) flatpak update -y ;;
+    snap)   sudo snap refresh ;;
+    cargo)
+      if command -v cargo-install-update >/dev/null 2>&1; then
+        cargo install-update -a
+      else
+        log_warning "cargo: install cargo-update for upgrades (cargo install cargo-update)"
+        return 1
+      fi
+      ;;
     *)      return 1 ;;
   esac
 }
@@ -1106,11 +1130,22 @@ run_import() {
 
 run_update() {
   require_initialized
+  log_debug "run_update: refreshing all PM indexes"
   for pm in $(detect_available_pms); do
-    log_info "Updating $pm..."
+    log_info "Updating $pm index..."
     pm_update "$pm" 2>/dev/null || log_warning "Update failed for $pm"
   done
   log_success "Package indexes updated"
+}
+
+run_upgrade() {
+  require_initialized
+  log_debug "run_upgrade: upgrading all packages per PM"
+  for pm in $(detect_available_pms); do
+    log_info "Upgrading packages via $pm..."
+    pm_upgrade "$pm" 2>/dev/null || log_warning "Upgrade failed for $pm"
+  done
+  log_success "Upgrade complete for all package managers"
 }
 
 run_destroy() {
@@ -1198,7 +1233,8 @@ ${BOLD}COMMANDS:${NC}
   rollback [N]     Rollback to backup N
   sync-desktop     Export desktop/DE state
   sync-desktop --restore  Restore desktop state
-  update           Update all package manager indexes
+  update           Update all package manager indexes (refresh only)
+  upgrade          Upgrade all packages via each package manager
   export [FILE]    Export config (tarball)
   import FILE      Import config
   destroy          Remove pdrx (use -y to skip prompt)
@@ -1298,6 +1334,7 @@ case "$CMD" in
     fi
     ;;
   update)         run_update "$@" ;;
+  upgrade)        run_upgrade "$@" ;;
   export)         run_export "$@" ;;
   import)         run_import "$@" ;;
   destroy)        run_destroy "$@" ;;

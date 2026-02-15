@@ -142,7 +142,8 @@ pdrx -c /opt/my-pdrx status     # Use alternate config directory
 | `rollback [N]` | Rollback to backup N | `pdrx rollback` or `pdrx rollback 2` |
 | `sync-desktop` | Export desktop/DE state | `pdrx sync-desktop` |
 | `sync-desktop --restore` | Restore desktop state | `pdrx sync-desktop --restore` |
-| `update` | Update all PM indexes | `pdrx update` |
+| `update` | Update all PM indexes (refresh only, no package upgrade) | `pdrx update` |
+| `upgrade` | Upgrade all packages via each PM | `pdrx upgrade` |
 | `export [FILE]` | Export config tarball | `pdrx export my-config.tar.gz` |
 | `import FILE` | Import config | `pdrx import my-config.tar.gz` |
 | `destroy` | Remove pdrx | `pdrx -y destroy` |
