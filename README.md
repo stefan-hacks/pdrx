@@ -4,7 +4,7 @@
 
 Imperatively install/remove packages while automatically updating a **declarative config** that records both the package and **which package manager** installed it. Restore your exact setup on any major Linux distribution.
 
-NOTE: This project originally started as scripts in my dotfiles, then stow which lead me to chez moi and then I combined them essentially as a wrapper to the nix eco system which caused me MANY issues and frustrations on GNOME so I decided to go nix free and just use BASH and have it support different distribution package managers. So instead of having to manually declare everything this still enables me to do normal linux imperative use of the package managers while generating declaritive files respectively. I finally decided to get cursor AI and shellcheck to help me clean up my bash scripts, ideas and documentation. Enjoy!! Please let me know if you encounter any issues.
+NOTE: This project originally started as scripts in my dotfiles, then stow which lead me to chez moi and then I combined them essentially as a wrapper to the nix eco system which caused me MANY issues and frustrations on GNOME so I decided to go nix free and just use BASH and have it support different distribution package managers. SO INSTEAD OF HAVING TO MANUALLY DECLARE EVERYTHING THIS STILL ENABLES ME TO DO NORMAL LINUX IMPERATIVE USE OF THE PACKAGE MANAGERS WHILE GENERATING DECLARITIVE FILES RESPECTIVELY. I also finally decided to get cursor AI and shellcheck to help me clean up my bash scripts, ideas and documentation. Enjoy!! Please let me know if you encounter any issues.
 
 ## Features
 
