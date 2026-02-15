@@ -4,6 +4,8 @@
 
 Imperatively install/remove packages while automatically updating a **declarative config** that records both the package and **which package manager** installed it. Restore your exact setup on any major Linux distribution.
 
+NOTE: This project originally started as bash aliases, then functions, then a few scripts, then I combined them essentially as a wrapper to the nix eco system which caused me many issues so I decidede to go nix free and just use BASH and have it support different package managers. So instead of having to manually declare everything this still enables me to do auto updates to the declaritive files respectively. So I finally decided to get cursor AI and shellcheck to help me clean up my bash scripts and ideas. Enjoy!! Please let me know if you encounter any issues.
+
 ## Features
 
 - **All major Linux distros** — Debian, Ubuntu, Fedora, Arch, openSUSE, etc.
