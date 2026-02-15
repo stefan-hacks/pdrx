@@ -35,6 +35,22 @@ make install
 pdrx init
 ```
 
+### Man page (optional)
+
+To install the man page so you can run **man pdrx** for detailed, offline documentation:
+
+```bash
+./install_manpage.sh --user    # Install to ~/.local/share/man (no root)
+# Or for system-wide:
+sudo ./install_manpage.sh --system
+```
+
+If **man pdrx** does not find the page after a user install, add to your `~/.bashrc` or `~/.zshrc`:
+
+```bash
+export MANPATH="$HOME/.local/share/man:$MANPATH"
+```
+
 ## Quick Start
 
 ```bash
@@ -114,14 +130,15 @@ pdrx -c /opt/my-pdrx status     # Use alternate config directory
 | `install --pm PM [pkg...]` | Install with specific PM | `pdrx install --pm flatpak org.gnome.GIMP`<br>`pdrx install --pm cargo ripgrep bat` |
 | `remove [pkg...]` | Remove packages (uses recorded PM) | `pdrx remove vim` |
 | `list` | List packages in declarative config | `pdrx list` |
-| `search TERM` | Search for packages | `pdrx search ripgrep`<br>`pdrx search --pm apt vim` |
+| `search TERM [num ...]` | Search with version (Name, Version, Publisher, Notes, Summary); optional PM numbers; default=all | `pdrx search ripgrep`<br>`pdrx search vim 1 4` (apt + snap)<br>`pdrx search --pm apt vim` |
 | `sync` | Capture current system into declarative config | `pdrx sync` |
 | `apply` | Install all from declarative config | `pdrx apply` |
 | `track FILE` | Track dotfile | `pdrx track ~/.bashrc` |
 | `untrack FILE` | Untrack dotfile | `pdrx untrack ~/.bashrc` |
 | `backup [LABEL]` | Create timestamped backup | `pdrx backup before-migration` |
 | `restore PATH` | Restore from backup | `pdrx restore ~/.pdrx/backups/20250214_120000_manual` |
-| `generations` | List backups | `pdrx generations` |
+| `generations` | List backups (ref numbers, oldest to newest; current at bottom) | `pdrx generations` |
+| `clean [ARG]` | Clean backups: `all`, `current`, single ref, or range (e.g. `10-3`) | `pdrx clean` (list)<br>`pdrx clean all`<br>`pdrx clean 2-4` |
 | `rollback [N]` | Rollback to backup N | `pdrx rollback` or `pdrx rollback 2` |
 | `sync-desktop` | Export desktop/DE state | `pdrx sync-desktop` |
 | `sync-desktop --restore` | Restore desktop state | `pdrx sync-desktop --restore` |

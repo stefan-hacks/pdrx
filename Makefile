@@ -4,7 +4,7 @@
 PREFIX ?= $(HOME)/.local
 BINDIR = $(PREFIX)/bin
 
-.PHONY: install install-user uninstall check
+.PHONY: install install-user uninstall check shellcheck
 
 install-user: ## Install to ~/.local/bin (default)
 	@mkdir -p $(BINDIR)
@@ -22,3 +22,6 @@ uninstall: ## Remove pdrx
 
 check: ## Basic syntax check
 	@bash -n pdrx && echo "Syntax OK"
+
+shellcheck: ## Run shellcheck on all Bash scripts
+	@shellcheck pdrx install_manpage.sh 2>/dev/null || (echo "Install shellcheck to run this target"; exit 1)
