@@ -1,6 +1,6 @@
 # pdrx — Portable Dynamic Reproducible gnu/linuX
 
-**Pure Bash tool for fully reproducible Linux system setups.** No Nix dependency.
+**Pure Bash tool for fully reproducible Linux system setups.** No Nix/stow/chez moi/ansible dependency.
 
 Imperatively install/remove packages while automatically updating a **declarative config** that records both the package and **which package manager** installed it. Restore your exact setup on any major Linux distribution.
 
@@ -358,7 +358,7 @@ pdrx apply
 pdrx sync-desktop --restore
 ```
 
-### New machine (fresh install)
+### New machine (fresh install) INSTALL YOUR PACKAGE MANAGERS FIRST - I have a script for mine.
 
 ```bash
 git clone https://github.com/YOUR_USER/my-pdrx-config.git ~/.pdrx
