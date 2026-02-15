@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2034
 #
-# pdrx - Portable Dynamic Reproducible X
+# pdrx - Portable Dynamic Reproducible gnu/linuX
 # Pure Bash tool for fully reproducible Linux system setups.
 # Imperative install/remove with automatic declarative config sync.
 # Supports: apt, dnf, yum, pacman, zypper, brew, flatpak, snap, cargo
@@ -1199,7 +1199,7 @@ run_install_self() {
 
 show_help() {
   cat << EOF
-${BOLD}${CYAN}pdrx v${VERSION} - Portable Dynamic Reproducible X${NC}
+${BOLD}${CYAN}pdrx v${VERSION} - Portable Dynamic Reproducible gnu/linuX${NC}
 Pure Bash reproducible system setup. No Nix. Works on all major Linux distros.
 
 ${BOLD}USAGE:${NC} pdrx [OPTIONS] COMMAND [ARGS...]

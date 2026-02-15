@@ -1,9 +1,9 @@
 .\" pdrx.1 - man page for pdrx
-.\" Portable Dynamic Reproducible X - reproducible Linux system setup
+.\" Portable Dynamic Reproducible gnu/linuX - reproducible Linux system setup
 .\" Use: groff -man -Tutf8 pdrx.1 | less
 .TH PDRX 1 "2025\-02\-15" "pdrx 1.4.7" "User Commands"
 .SH NAME
-pdrx \- Portable Dynamic Reproducible X: reproducible Linux system setup with declarative package config
+pdrx \- Portable Dynamic Reproducible gnu/linuX: reproducible Linux system setup with declarative package config
 .SH SYNOPSIS
 .B pdrx
 [\fIOPTIONS\fR] \fICOMMAND\fR [\fIARGS\fR...]
@@ -18,7 +18,7 @@ pdrx \- Portable Dynamic Reproducible X: reproducible Linux system setup with de
 \fB\-\-install\fR
 .SH DESCRIPTION
 .B pdrx
-(Portable Dynamic Reproducible X) is a pure Bash tool for fully reproducible Linux system setups. It has no Nix or other external dependency and works on Debian, Ubuntu, Fedora, Arch, openSUSE, and other major distributions.
+(Portable Dynamic Reproducible gnu/linuX) is a pure Bash tool for fully reproducible Linux system setups. It has no Nix or other external dependency and works on Debian, Ubuntu, Fedora, Arch, openSUSE, and other major distributions.
 .PP
 You install and remove packages imperatively (e.g. \fBpdrx install vim\fR). pdrx records each package together with the \fIpackage manager\fR used (apt, flatpak, cargo, etc.) in a declarative config file. When you run \fBpdrx apply\fR on another machine, it installs the same packages via the same package managers, giving you a reproducible environment.
 .PP

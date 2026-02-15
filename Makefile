@@ -1,4 +1,4 @@
-# pdrx - Portable Dynamic Reproducible X
+# pdrx - Portable Dynamic Reproducible gnu/linuX
 # Makefile for installation
 
 PREFIX ?= $(HOME)/.local

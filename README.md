@@ -1,4 +1,4 @@
-# pdrx — Portable Dynamic Reproducible linuX
+# pdrx — Portable Dynamic Reproducible gnu/linuX
 
 **Pure Bash tool for fully reproducible Linux system setups.** No Nix dependency.
 
