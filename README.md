@@ -270,6 +270,84 @@ git commit -m "Update config"
 git push
 ```
 
+### 7. One repo for multiple users or machines
+
+You can keep **several pdrx configs** (e.g. different users or machines) in **one GitHub repo** by using one directory per “profile”. Each directory is a full pdrx home (its own `config/` and `state/`). Use **`-c DIR`** or **`PDRX_HOME`** so pdrx uses the right one.
+
+**1. Create a repo and clone it once (e.g. for all your configs):**
+
+```bash
+git clone https://github.com/YOUR_USERNAME/my-pdrx-configs.git ~/pdrx-configs
+cd ~/pdrx-configs
+```
+
+**2. Add one directory per user or machine (each will be a pdrx “home”):**
+
+Examples: `alice`, `bob`, `laptop`, `desktop`, `work`, etc.
+
+```bash
+mkdir -p alice/config alice/state
+mkdir -p laptop/config laptop/state
+# Repeat for each profile
+```
+
+**3. Add a root `.gitignore`** (so backups stay local and optional):
+
+```bash
+# In ~/pdrx-configs/.gitignore
+backups/
+*.tar.gz
+```
+
+**4. Use a profile by pointing pdrx at its directory:**
+
+```bash
+# Use "alice" config for this session
+export PDRX_HOME=~/pdrx-configs/alice
+pdrx init          # first time only
+pdrx apply         # install packages for this profile
+pdrx sync-desktop --restore
+```
+
+Or without exporting (every command):
+
+```bash
+pdrx -c ~/pdrx-configs/alice init
+pdrx -c ~/pdrx-configs/alice apply
+pdrx -c ~/pdrx-configs/laptop status   # different profile
+```
+
+**5. Optional: small wrapper scripts or shell aliases** so you don’t type `-c` each time:
+
+```bash
+# In ~/.bashrc or ~/.zshrc
+alias pdrx-alice='pdrx -c ~/pdrx-configs/alice'
+alias pdrx-laptop='pdrx -c ~/pdrx-configs/laptop'
+
+# Then:
+pdrx-alice sync
+pdrx-laptop apply
+```
+
+**6. Workflow per profile:** from the repo root, add/commit only the profile you changed:
+
+```bash
+cd ~/pdrx-configs
+git add alice/config alice/state
+git commit -m "Update alice config"
+git push
+```
+
+On another machine (or as another user), clone the same repo and use the same profile name:
+
+```bash
+git clone https://github.com/YOUR_USERNAME/my-pdrx-configs.git ~/pdrx-configs
+pdrx -c ~/pdrx-configs/laptop init
+pdrx -c ~/pdrx-configs/laptop apply
+```
+
+**Summary:** One repo → many directories (one per user/machine). Always pass that directory with **`-c ~/pdrx-configs/PROFILE`** or set **`PDRX_HOME=~/pdrx-configs/PROFILE`** so pdrx uses the right config.
+
 ---
 
 ## Workflow: desktop user
