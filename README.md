@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="icon_pdrx.png" width="192" alt="pygr" />
+</p>
+
 # pdrx — Portable Dynamic Reproducible gnu/linuX
 
 **Pure Bash tool for fully reproducible Linux system setups.** No Nix/stow/chez moi/ansible dependency.
