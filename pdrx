@@ -1159,17 +1159,21 @@ run_destroy() {
   echo ""
   [ "$YES" != "true" ] && { printf "Type 'yes' to continue: "; read -r r; [ "$r" != "yes" ] && return 0; }
 
-  # Restore tracked dotfiles: replace symlinks with real files so configs/rc files are back safely
+  # Restore tracked dotfiles: remove symlinks and put real files back in correct locations
   if [ -f "$TRACKED_DOTFILES" ]; then
     while IFS= read -r rel; do
       [ -z "$rel" ] && continue
       local dest="$HOME/$rel"
       local src="$DOTFILES_DIR/$rel"
-      if [ -L "$dest" ] && [ -f "$src" ]; then
+      if [ -L "$dest" ]; then
         rm -f "$dest"
-        mkdir -p "$(dirname "$dest")"
-        cp "$src" "$dest"
-        log_success "Restored $rel (symlink replaced with real file)"
+        if [ -f "$src" ]; then
+          mkdir -p "$(dirname "$dest")"
+          cp "$src" "$dest"
+          log_success "Restored $rel (symlink replaced with real file)"
+        else
+          log_warning "Removed symlink $rel (pdrx copy missing)"
+        fi
       fi
     done < "$TRACKED_DOTFILES"
   fi
