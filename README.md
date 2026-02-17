@@ -23,6 +23,30 @@ NOTE: This project originally started as scripts in my dotfiles, then stow which
 
 ## Installation
 
+### One-line install (curl or wget)
+
+Install to `~/.local/bin` and make executable in a single command:
+
+```bash
+# With curl (create dir, download, make executable):
+mkdir -p ~/.local/bin && curl -sSL https://raw.githubusercontent.com/stefan-hacks/pdrx/main/pdrx -o ~/.local/bin/pdrx && chmod +x ~/.local/bin/pdrx
+```
+
+```bash
+# With wget:
+mkdir -p ~/.local/bin && wget -qO ~/.local/bin/pdrx https://raw.githubusercontent.com/stefan-hacks/pdrx/main/pdrx && chmod +x ~/.local/bin/pdrx
+```
+
+Ensure `~/.local/bin` is in your PATH (add to `~/.bashrc` or `~/.zshrc` if needed):
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Then run `pdrx init` to initialize.
+
+### Clone and install
+
 ```bash
 git clone https://github.com/stefan-hacks/pdrx.git
 cd pdrx
