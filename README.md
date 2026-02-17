@@ -146,7 +146,7 @@ pdrx -c /opt/my-pdrx status     # Use alternate config directory
 | `upgrade` | Upgrade all packages via each PM | `pdrx upgrade` |
 | `export [FILE]` | Export config tarball | `pdrx export my-config.tar.gz` |
 | `import FILE` | Import config | `pdrx import my-config.tar.gz` |
-| `destroy` | Remove pdrx | `pdrx -y destroy` |
+| `destroy` | Restore tracked dotfiles (symlinks → real files), then remove pdrx | `pdrx destroy` or `pdrx -y destroy` |
 
 ## Supported Package Managers
 

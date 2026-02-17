@@ -1150,13 +1150,29 @@ run_upgrade() {
 
 run_destroy() {
   log_header "Destroy pdrx"
-  echo "This will remove:"
-  echo "  • $PDRX_HOME (config, backups, state)"
-  echo "  • pdrx from ~/.local/bin"
+  echo "This will:"
+  echo "  • Restore tracked dotfiles: replace symlinks with real files (content from pdrx copy)"
+  echo "  • Remove $PDRX_HOME (config, backups, state)"
+  echo "  • Remove pdrx from ~/.local/bin"
   echo ""
   echo "Installed packages will NOT be uninstalled."
   echo ""
   [ "$YES" != "true" ] && { printf "Type 'yes' to continue: "; read -r r; [ "$r" != "yes" ] && return 0; }
+
+  # Restore tracked dotfiles: replace symlinks with real files so configs/rc files are back safely
+  if [ -f "$TRACKED_DOTFILES" ]; then
+    while IFS= read -r rel; do
+      [ -z "$rel" ] && continue
+      local dest="$HOME/$rel"
+      local src="$DOTFILES_DIR/$rel"
+      if [ -L "$dest" ] && [ -f "$src" ]; then
+        rm -f "$dest"
+        mkdir -p "$(dirname "$dest")"
+        cp "$src" "$dest"
+        log_success "Restored $rel (symlink replaced with real file)"
+      fi
+    done < "$TRACKED_DOTFILES"
+  fi
 
   rm -rf "$PDRX_HOME"
   [ -f "$HOME/.local/bin/pdrx" ] && rm -f "$HOME/.local/bin/pdrx"
@@ -1168,7 +1184,7 @@ run_destroy() {
       grep -v -F '# Added by pdrx' "$rc" | grep -v -F 'export PATH="$PATH:$HOME/.local/bin"' > "${rc}.tmp" 2>/dev/null && mv "${rc}.tmp" "$rc"
     fi
   done
-  log_success "pdrx destroyed."
+  log_success "pdrx destroyed. Dotfiles restored to real files; symlinks removed."
 }
 
 run_install_self() {
@@ -1237,7 +1253,7 @@ ${BOLD}COMMANDS:${NC}
   upgrade          Upgrade all packages via each package manager
   export [FILE]    Export config (tarball)
   import FILE      Import config
-  destroy          Remove pdrx (use -y to skip prompt)
+  destroy          Restore dotfiles (symlinks→real files), then remove pdrx (-y to skip prompt)
 
 ${BOLD}SUPPORTED PACKAGE MANAGERS:${NC}
   apt, dnf, yum, pacman, zypper, brew, flatpak, snap, cargo

@@ -243,7 +243,7 @@ Import a config tarball (created with \fBpdrx export\fR) into the current pdrx h
 .B pdrx import my-config.tar.gz
 .RE
 .SS destroy
-Remove pdrx completely: delete the pdrx home directory (config, backups, state) and the \fI~/.local/bin/pdrx\fR binary, and remove the PATH line added to \fI~/.bashrc\fR and \fI~/.zshrc\fR. \fBDoes not\fR uninstall packages that were installed with pdrx. Prompts for confirmation unless \fB\-y\fR.
+Return the system to the way it was before using pdrx. All configs and rc files are put back safely: for each tracked dotfile that is currently a symlink, the symlink is removed and replaced with a real file (content copied from the pdrx config), so files like \fI~/.bashrc\fR and \fI~/.config/nvim/init.vim\fR are restored to their correct locations with no symlinks left. Then the pdrx home directory (config, backups, state) is deleted, the \fI~/.local/bin/pdrx\fR binary is removed, and the PATH line added to \fI~/.bashrc\fR and \fI~/.zshrc\fR is removed. \fBDoes not\fR uninstall packages that were installed with pdrx. Prompts for confirmation unless \fB\-y\fR.
 .PP
 .RS
 .B pdrx destroy
@@ -382,6 +382,12 @@ Reproduce setup on a new machine:
 \fBpdrx apply\fR
 \fBpdrx sync-desktop \-\-restore\fR
 .fi
+.RE
+.PP
+Revert to pre\-pdrx state (restore dotfiles to real files, remove symlinks, remove pdrx):
+.PP
+.RS
+\fBpdrx destroy\fR
 .RE
 .SH SEE ALSO
 \fBapt\fR(8), \fBdnf\fR(8), \fBpacman\fR(8), \fBflatpak\fR(1), \fBsnap\fR(8), \fBcargo\fR(1), \fBbrew\fR(1)
