@@ -45,6 +45,23 @@ export PATH="$HOME/.local/bin:$PATH"
 
 Then run `pdrx init` to initialize.
 
+### Homebrew (macOS / Linux)
+
+If you use [Homebrew](https://brew.sh/), you can install **pdrx** and the **man page** in one step:
+
+```bash
+brew tap stefan-hacks/pdrx https://github.com/stefan-hacks/pdrx
+brew install pdrx
+```
+
+This installs the `pdrx` binary and the man page (so `man pdrx` works). Then run `pdrx init` to initialize your config.
+
+To upgrade to the latest release:
+
+```bash
+brew upgrade pdrx
+```
+
 ### Clone and install
 
 ```bash
