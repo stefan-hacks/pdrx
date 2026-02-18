@@ -10,7 +10,7 @@
 
 set -euo pipefail
 
-VERSION="1.4.7"
+VERSION="1.4.8"
 
 # =============================================================================
 # PORTABLE HELPERS (POSIX + Bash, works on all Linux)
@@ -715,7 +715,11 @@ run_remove() {
     if [ -n "$line" ]; then
       local pm="${line%%:*}"
       log_info "Removing $pkg (from $pm)"
-      pm_remove "$pm" "$pkg" 2>/dev/null || true
+      if pm_available "$pm"; then
+        pm_remove "$pm" "$pkg" 2>/dev/null || true
+      else
+        log_info "PM $pm not available; removing from config only"
+      fi
       remove_from_packages_conf "$pm" "$pkg"
       log_success "Removed $pkg"
     else
@@ -839,7 +843,9 @@ run_sync() {
   log_debug "run_sync: starting"
   log_header "Sync: capture system state into declarative config"
 
-  # Build current installed set with PM attribution
+  # Build current installed set only from available PMs (no merge with existing).
+  # This updates packages.conf to match reality: entries for removed PMs (e.g. snap)
+  # or uninstalled packages are dropped.
   local tmp
   tmp=$(mktemp)
   log_debug "run_sync: temp file $tmp"
@@ -848,11 +854,6 @@ run_sync() {
       [ -n "$pkg" ] && echo "$pm:$pkg" >> "$tmp"
     done || true
   done
-
-  # Merge with existing (keep user additions, add newly detected)
-  if [ -f "$PACKAGES_CONF" ]; then
-    grep -E '^[a-z]+:.+' "$PACKAGES_CONF" 2>/dev/null >> "$tmp" || true
-  fi
   sort -u "$tmp" | grep -v '^$' > "${PACKAGES_CONF}.new" || true
   rm -f "$tmp"
 
