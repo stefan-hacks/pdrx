@@ -9,7 +9,7 @@ class Pdrx < Formula
   desc "Portable Dynamic Reproducible gnu/linuX - reproducible Linux/macOS system setup"
   homepage "https://github.com/stefan-hacks/pdrx"
   url "https://github.com/stefan-hacks/pdrx/archive/refs/tags/v1.4.8.tar.gz"
-  sha256 "d5558cd419c8d46bdc958064cb97f963d1ea793866414c025906ec15033512ed"
+  sha256 "d2dbbd40a9d71979d482d2860f48e99ee28af1d24c89a3ab0061b12d1bc282d3"
   license "MIT"
   head "https://github.com/stefan-hacks/pdrx.git", branch: "main"
 
