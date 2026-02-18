@@ -24,4 +24,17 @@ brew install pdrx
 
 4. Commit and push the formula change.
 
+## "Failed to download resource" when running brew install
+
+This usually means the **Git tag** for the formula’s version does not exist on GitHub. The formula downloads `https://github.com/stefan-hacks/pdrx/archive/refs/tags/vX.Y.Z.tar.gz`, which only works if the tag `vX.Y.Z` has been pushed.
+
+**Fix:** Create and push the tag (replace with the version in `Formula/pdrx.rb`):
+
+```bash
+git tag v1.4.8
+git push origin v1.4.8
+```
+
+After the tag is on GitHub, `brew install pdrx` (and `brew upgrade pdrx`) will succeed.
+
 Reference: [How to Create and Maintain a Tap](https://docs.brew.sh/How-to-Create-and-Maintain-a-Tap), [Formula Cookbook](https://docs.brew.sh/Formula-Cookbook).

@@ -25,3 +25,9 @@ check: ## Basic syntax check
 
 shellcheck: ## Run shellcheck on all Bash scripts
 	@shellcheck pdrx install_manpage.sh 2>/dev/null || (echo "Install shellcheck to run this target"; exit 1)
+
+release-tag: ## Show commands to create and push the version tag (needed for brew install)
+	@V=$$(grep '^VERSION=' pdrx | cut -d'"' -f2); \
+	echo "To fix 'Failed to download resource' for Homebrew, push the tag for this version:"; \
+	echo "  git tag v$$V"; \
+	echo "  git push origin v$$V"
