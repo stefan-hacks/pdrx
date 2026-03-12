@@ -9,7 +9,7 @@ class Pdrx < Formula
   desc "Portable Dynamic Reproducible gnu/linuX - reproducible Linux/macOS system setup"
   homepage "https://github.com/stefan-hacks/pdrx"
   url "https://github.com/stefan-hacks/pdrx/archive/refs/tags/v1.4.8.tar.gz"
-  sha256 "d2dbbd40a9d71979d482d2860f48e99ee28af1d24c89a3ab0061b12d1bc282d3"
+  sha256 "6d9ac2bb907d8b82b85493af15fcf0f9077a884a16be98665733babe58ab4e14"
   license "MIT"
   head "https://github.com/stefan-hacks/pdrx.git", branch: "main"
 
@@ -19,7 +19,7 @@ class Pdrx < Formula
   end
 
   test do
-    assert_match "1.4.8", shell_output("#{bin}/pdrx -v")
+    assert_match "1.5.0", shell_output("#{bin}/pdrx -v")
     assert_match "pdrx", shell_output("#{bin}/pdrx --help", 0)
   end
 end
