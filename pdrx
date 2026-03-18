@@ -10,10 +10,10 @@
 
 set -euo pipefail
 
-VERSION="1.5.0"
+VERSION="1.6.0"
 
 # =============================================================================
-# PORTABLE HELPERS (POSIX + Bash, works on all Linux)
+# PORTABLE HELPERS
 # =============================================================================
 
 get_script_path() {
@@ -38,7 +38,6 @@ date_iso_seconds() {
   fi
 }
 
-# Detect distro from /etc/os-release
 detect_os_id() {
   if [ -f /etc/os-release ]; then
     # shellcheck source=/dev/null
@@ -67,7 +66,7 @@ PDRX_HOME="${PDRX_HOME:-$HOME/.pdrx}"
 PDRX_CONFIG="$PDRX_HOME/config"
 PDRX_BACKUP="$PDRX_HOME/backups"
 PDRX_STATE="$PDRX_HOME/state"
-PACKAGES_CONF="$PDRX_CONFIG/packages.conf"      # declarative: pm:package or pm:package=version
+PACKAGES_CONF="$PDRX_CONFIG/packages.conf"
 DOTFILES_DIR="$PDRX_CONFIG/dotfiles"
 TRACKED_DOTFILES="$PDRX_STATE/tracked-dotfiles"
 DESKTOP_EXPORT="$PDRX_CONFIG/desktop-export"
@@ -77,7 +76,6 @@ GENERATIONS_FILE="$PDRX_STATE/generations"
 # PACKAGE MANAGER REGISTRY
 # =============================================================================
 
-# Returns space-separated list of available PMs
 detect_available_pms() {
   local pms=""
   command -v apt-get >/dev/null 2>&1  && pms="$pms apt"
@@ -93,7 +91,6 @@ detect_available_pms() {
   echo "$pms" | sed 's/^ *//;s/ *$//'
 }
 
-# Check if PM is available
 pm_available() {
   local pm="$1"
   case "$pm" in
@@ -111,7 +108,6 @@ pm_available() {
   esac
 }
 
-# List installed packages for a given PM (one package per line, name only)
 pm_list_installed() {
   local pm="$1"
   case "$pm" in
@@ -152,7 +148,6 @@ pm_list_installed() {
   esac
 }
 
-# Get installed version of a package for a given PM
 pm_installed_version() {
   local pm="$1"
   local pkg="$2"
@@ -191,32 +186,12 @@ pm_installed_version() {
   esac
 }
 
-# Search for package (raw output)
-pm_search() {
-  local term="$1"
-  local pm="$2"
-  case "$pm" in
-    apt)     apt-cache search "$term" 2>/dev/null | head -20 ;;
-    dnf|yum) "$pm" search "$term" 2>/dev/null | head -20 ;;
-    pacman)  pacman -Ss "$term" 2>/dev/null | grep -E '^[a-z]' | head -20 ;;
-    zypper)  zypper search "$term" 2>/dev/null | head -20 ;;
-    brew)    brew search "$term" 2>/dev/null | head -20 ;;
-    flatpak) flatpak search "$term" 2>/dev/null | head -20 ;;
-    snap)    snap search "$term" 2>/dev/null | head -20 ;;
-    cargo)   cargo search "$term" 2>/dev/null | head -20 ;;
-    winget)  winget search "$term" 2>/dev/null | head -20 ;;
-    *)       return 1 ;;
-  esac
-}
-
-# Print table header for search results
 _print_search_header() {
   printf "%-28s %-14s %-18s %-8s %s\n" "Name" "Version" "Publisher" "Notes" "Summary"
   printf "%-28s %-14s %-18s %-8s %s\n" \
     "---------------------------" "-------------" "-----------------" "--------" "--------"
 }
 
-# Search with formatted output (Name, Version, Publisher, Notes, Summary)
 pm_search_formatted() {
   local term="$1"
   local pm="$2"
@@ -338,7 +313,6 @@ pm_search_formatted() {
   esac
 }
 
-# Install package with given PM (optional version for --pin)
 pm_install() {
   local pm="$1"
   local pkg="$2"
@@ -366,7 +340,6 @@ pm_install() {
       fi
       ;;
     pacman)
-      # pacman does not support CLI version pinning; install latest and warn
       if [ -n "$version" ]; then
         log_warning "pacman: version pinning not supported via CLI; installing latest $pkg"
       fi
@@ -380,7 +353,6 @@ pm_install() {
       fi
       ;;
     brew)
-      # brew does not use sudo on either Linux or macOS
       if [ -n "$version" ]; then
         brew install "${pkg}@${version}" 2>/dev/null \
           || { log_warning "brew: versioned formula ${pkg}@${version} not found; installing latest"; brew install "$pkg"; }
@@ -426,7 +398,6 @@ pm_install() {
   esac
 }
 
-# Remove package with given PM
 pm_remove() {
   local pm="$1"
   local pkg="$2"
@@ -445,7 +416,6 @@ pm_remove() {
   esac
 }
 
-# Check if package is installed
 pm_is_installed() {
   local pm="$1"
   local pkg="$2"
@@ -483,7 +453,6 @@ pm_is_installed() {
   esac
 }
 
-# Update package index/cache for PM
 pm_update() {
   local pm="$1"
   case "$pm" in
@@ -497,7 +466,6 @@ pm_update() {
     snap)    sudo snap refresh ;;
     winget)  winget source update ;;
     cargo)
-      # cargo has no index update; warn but don't fail
       log_warning "cargo: no index update available (use 'pdrx upgrade' to upgrade crates)"
       ;;
     *)
@@ -506,7 +474,6 @@ pm_update() {
   esac
 }
 
-# Upgrade all packages for PM
 pm_upgrade() {
   local pm="$1"
   case "$pm" in
@@ -548,7 +515,6 @@ pm_upgrade() {
 # DESKTOP ENVIRONMENT
 # =============================================================================
 
-# Safe copy helpers — avoids SC2015 (A && B || C is not if-then-else)
 _cp_file() { if [ -f "$1" ]; then cp    "$1" "$2" 2>/dev/null || true; fi; }
 _cp_dir()  { if [ -d "$1" ]; then cp -R "$1" "$2" 2>/dev/null || true; fi; }
 
@@ -557,12 +523,12 @@ get_desktop_id() {
   local gdm="${GDMSESSION:-}"
   [ "$(uname -s)" = "Darwin" ] && { echo "macos"; return; }
   case "${xdg}${gdm}" in
-    *[Hh][Yy][Pp][Rr]*)            echo "hyprland"; return ;;
-    *[Gg][Nn][Oo][Mm][Ee]*)        echo "gnome";    return ;;
-    *[Pp][Ll][Aa][Ss][Mm][Aa]*|*[Kk][Dd][Ee]*) echo "kde"; return ;;
-    *[Xx][Ff][Cc][Ee]*)            echo "xfce";     return ;;
-    *[Ss][Ww][Aa][Yy]*)            echo "sway";     return ;;
-    *[Ii]3*)                        echo "i3";       return ;;
+    *[Hh][Yy][Pp][Rr]*)                     echo "hyprland"; return ;;
+    *[Gg][Nn][Oo][Mm][Ee]*)                  echo "gnome";    return ;;
+    *[Pp][Ll][Aa][Ss][Mm][Aa]*|*[Kk][Dd][Ee]*) echo "kde";   return ;;
+    *[Xx][Ff][Cc][Ee]*)                      echo "xfce";     return ;;
+    *[Ss][Ww][Aa][Yy]*)                      echo "sway";     return ;;
+    *[Ii]3*)                                 echo "i3";        return ;;
   esac
   [ "${XDG_SESSION_TYPE:-}" = "wayland" ] && [ -n "${WAYLAND_DISPLAY:-}" ] \
     && { echo "wayland"; return; }
@@ -595,9 +561,9 @@ export_desktop_state() {
       fi
       if command -v gsettings >/dev/null 2>&1; then
         mkdir -p "$out/gsettings"
-        for schema in $(gsettings list-schemas 2>/dev/null); do
+        while IFS= read -r schema; do
           gsettings list-recursively "$schema" 2>/dev/null > "$out/gsettings/${schema}.txt" || true
-        done
+        done < <(gsettings list-schemas 2>/dev/null)
         gsettings get org.gnome.shell enabled-extensions 2>/dev/null \
           > "$out/gnome-enabled-extensions.txt" || true
       fi
@@ -609,9 +575,10 @@ export_desktop_state() {
       ;;
     kde)
       mkdir -p "$out/.config" "$out/.local"
-      find "$HOME/.config" -maxdepth 1 \( -name 'kde*' -o -name 'plasma*' -o -name 'kwin*' \
-        -o -name 'kscreen*' -o -name 'kglobal*' \) 2>/dev/null \
-        | while IFS= read -r f; do cp -R "$f" "$out/.config/" 2>/dev/null || true; done
+      while IFS= read -r f; do
+        cp -R "$f" "$out/.config/" 2>/dev/null || true
+      done < <(find "$HOME/.config" -maxdepth 1 \( -name 'kde*' -o -name 'plasma*' \
+        -o -name 'kwin*' -o -name 'kscreen*' -o -name 'kglobal*' \) 2>/dev/null)
       ;;
     xfce)
       _cp_dir "$HOME/.config/xfce4"  "$out/"
@@ -726,7 +693,7 @@ log_info()    { [ "${QUIET:-false}" != "true" ] && echo "${BLUE}[INFO]${NC} $*";
 log_success() { [ "${QUIET:-false}" != "true" ] && echo "${GREEN}[SUCCESS]${NC} $*"; true; }
 log_warning() { echo "${YELLOW}[WARNING]${NC} $*"; }
 log_error()   { echo "${RED}[ERROR]${NC} $*" >&2; }
-log_header()  { [ "${QUIET:-false}" != "true" ] && echo -e "\n${BOLD}${CYAN}━━━ $* ━━━${NC}\n"; true; }
+log_header()  { [ "${QUIET:-false}" != "true" ] && printf "\n%s━━━ %s ━━━%s\n\n" "${BOLD}${CYAN}" "$*" "${NC}"; true; }
 log_debug()   { [ "${DEBUG:-false}" = "true" ] && echo "${YELLOW}[DEBUG]${NC} $*" >&2; true; }
 
 # =============================================================================
@@ -754,45 +721,36 @@ mark_initialized() {
   detect_os_id > "$PDRX_STATE/os-id"
 }
 
-# Load packages from declarative config
 load_packages_conf() {
   [ -f "$PACKAGES_CONF" ] || return 0
   grep -v '^#' "$PACKAGES_CONF" | grep -v '^$' | sort -u
 }
 
-# Parse a config line into pm, pkg, version
-# Format: pm:pkg  or  pm:pkg=version
 _parse_conf_line() {
   local line="$1"
-  local _pm _rest _pkg _version
-  _pm="${line%%:*}"
+  local _rest
+  PARSED_PM="${line%%:*}"
   _rest="${line#*:}"
   if [[ "$_rest" == *=* ]]; then
-    _pkg="${_rest%%=*}"
-    _version="${_rest#*=}"
+    PARSED_PKG="${_rest%%=*}"
+    PARSED_VERSION="${_rest#*=}"
   else
-    _pkg="$_rest"
-    _version=""
+    PARSED_PKG="$_rest"
+    PARSED_VERSION=""
   fi
-  # Export to caller via these names
-  PARSED_PM="$_pm"
-  PARSED_PKG="$_pkg"
-  PARSED_VERSION="$_version"
 }
 
-# Atomic append of package to config (write to tmp, then mv)
+# FIX: Use proper atomic write with correct tmp handling
 append_packages_conf() {
   local pm="$1"
   local pkg="$2"
-  local version="${3:-}"   # only set when --pin is used
+  local version="${3:-}"
   local line
   if [ -n "$version" ]; then
     line="$pm:${pkg}=${version}"
   else
     line="$pm:$pkg"
   fi
-  # Also remove any existing entry for this pm:pkg (regardless of version)
-  # so we don't duplicate when re-pinning
   local tmp
   tmp=$(mktemp "${PACKAGES_CONF}.XXXXXX")
   if [ -f "$PACKAGES_CONF" ]; then
@@ -802,7 +760,6 @@ append_packages_conf() {
   mv "$tmp" "$PACKAGES_CONF"
 }
 
-# Atomic removal of package from config
 remove_from_packages_conf() {
   local pm="$1"
   local pkg="$2"
@@ -864,6 +821,7 @@ run_install() {
   read -ra pms <<< "$(detect_available_pms)"
   [ ${#pms[@]} -eq 0 ] && { log_error "No package managers found."; exit 1; }
 
+  local pkg
   for pkg in "${pkgs[@]}"; do
     log_header "Install: $pkg"
     local pm
@@ -873,6 +831,7 @@ run_install() {
     else
       echo "Select package manager for '$pkg':"
       local i=1
+      local p
       for p in "${pms[@]}"; do echo "  $i) $p"; i=$((i+1)); done
       printf "Choice [1-%d]: " "${#pms[@]}"
       read -r choice
@@ -881,24 +840,22 @@ run_install() {
     fi
 
     if pm_available "$pm"; then
-      pm_install "$pm" "$pkg" "$PIN_VERSION" \
-        && {
-          local recorded_version="$PIN_VERSION"
-          if [ "$PIN" = "true" ] && [ -z "$recorded_version" ]; then
-            # Auto-detect version after install
-            recorded_version=$(pm_installed_version "$pm" "$pkg" 2>/dev/null || echo "")
-            if [ -z "$recorded_version" ]; then
-              log_warning "Could not detect installed version of $pkg; recording without pin"
-            fi
+      local recorded_version="$PIN_VERSION"
+      if pm_install "$pm" "$pkg" "$PIN_VERSION"; then
+        if [ "$PIN" = "true" ] && [ -z "$recorded_version" ]; then
+          recorded_version=$(pm_installed_version "$pm" "$pkg" 2>/dev/null || echo "")
+          if [ -z "$recorded_version" ]; then
+            log_warning "Could not detect installed version of $pkg; recording without pin"
           fi
-          if [ "$PIN" = "true" ] && [ -n "$recorded_version" ]; then
-            append_packages_conf "$pm" "$pkg" "$recorded_version"
-            log_success "Installed and pinned $pkg=$recorded_version via $pm"
-          else
-            append_packages_conf "$pm" "$pkg"
-            log_success "Installed $pkg via $pm"
-          fi
-        }
+        fi
+        if [ "$PIN" = "true" ] && [ -n "$recorded_version" ]; then
+          append_packages_conf "$pm" "$pkg" "$recorded_version"
+          log_success "Installed and pinned $pkg=$recorded_version via $pm"
+        else
+          append_packages_conf "$pm" "$pkg"
+          log_success "Installed $pkg via $pm"
+        fi
+      fi
     else
       log_error "PM $pm not available"
     fi
@@ -925,24 +882,24 @@ run_install_with_pm() {
   pm_available "$pm" || { log_error "PM $pm not available"; exit 1; }
   log_debug "run_install_with_pm: pm=$pm pkgs=(${pkgs[*]:-}) PIN=$PIN PIN_VERSION=$PIN_VERSION"
 
+  local pkg
   for pkg in "${pkgs[@]}"; do
-    pm_install "$pm" "$pkg" "$PIN_VERSION" \
-      && {
-        local recorded_version="$PIN_VERSION"
-        if [ "$PIN" = "true" ] && [ -z "$recorded_version" ]; then
-          recorded_version=$(pm_installed_version "$pm" "$pkg" 2>/dev/null || echo "")
-          if [ -z "$recorded_version" ]; then
-            log_warning "Could not detect installed version of $pkg; recording without pin"
-          fi
+    local recorded_version="$PIN_VERSION"
+    if pm_install "$pm" "$pkg" "$PIN_VERSION"; then
+      if [ "$PIN" = "true" ] && [ -z "$recorded_version" ]; then
+        recorded_version=$(pm_installed_version "$pm" "$pkg" 2>/dev/null || echo "")
+        if [ -z "$recorded_version" ]; then
+          log_warning "Could not detect installed version of $pkg; recording without pin"
         fi
-        if [ "$PIN" = "true" ] && [ -n "$recorded_version" ]; then
-          append_packages_conf "$pm" "$pkg" "$recorded_version"
-          log_success "Installed and pinned $pkg=$recorded_version via $pm"
-        else
-          append_packages_conf "$pm" "$pkg"
-          log_success "Installed $pkg via $pm"
-        fi
-      }
+      fi
+      if [ "$PIN" = "true" ] && [ -n "$recorded_version" ]; then
+        append_packages_conf "$pm" "$pkg" "$recorded_version"
+        log_success "Installed and pinned $pkg=$recorded_version via $pm"
+      else
+        append_packages_conf "$pm" "$pkg"
+        log_success "Installed $pkg via $pm"
+      fi
+    fi
   done
 }
 
@@ -951,6 +908,7 @@ run_remove() {
   local pkgs=("$@")
   [ ${#pkgs[@]} -eq 0 ] && { log_error "Usage: pdrx remove <pkg> [pkg...]"; exit 1; }
 
+  local pkg
   for pkg in "${pkgs[@]}"; do
     local line
     line=$(grep -E ":${pkg}(=.*)?$" "$PACKAGES_CONF" 2>/dev/null | head -1)
@@ -977,9 +935,10 @@ run_remove() {
             log_info "[dry-run] would remove: $pkg (via $pm)"
             break
           fi
-          pm_remove "$pm" "$pkg" \
-            && remove_from_packages_conf "$pm" "$pkg" \
-            && log_success "Removed $pkg from $pm"
+          if pm_remove "$pm" "$pkg"; then
+            remove_from_packages_conf "$pm" "$pkg"
+            log_success "Removed $pkg from $pm"
+          fi
           break
         fi
       done
@@ -992,7 +951,8 @@ run_list() {
   log_header "Installed packages (declarative config)"
   if [ -s "$PACKAGES_CONF" ]; then
     while IFS= read -r line; do
-      [ -z "$line" ] || [[ "$line" == \#* ]] && continue
+      [ -z "$line" ] && continue
+      [[ "$line" == \#* ]] && continue
       [[ "$line" =~ ^[a-z]+:.+ ]] || continue
       echo "  $line"
     done < "$PACKAGES_CONF"
@@ -1030,25 +990,23 @@ run_search() {
   read -ra pms <<< "$(detect_available_pms)"
   [ ${#pms[@]} -eq 0 ] && { log_error "No package managers found."; exit 1; }
 
-  # Run search across a list of PMs, optionally in parallel (buffered per PM)
   _run_search_pms() {
     local t="$1"
     shift
     local to_search=("$@")
 
     if [ "$PARALLEL_SEARCH" = "true" ] && [ ${#to_search[@]} -gt 1 ]; then
-      # Parallel: write each PM's output to a temp file, print in order after all finish
       local tmpdir
       tmpdir=$(mktemp -d)
       local pids=()
       local idx=0
+      local p
       for p in "${to_search[@]}"; do
         local outfile="$tmpdir/${idx}_${p}"
         {
           {
             echo ""
-            echo "${BOLD}${CYAN}━━━ ${p} ━━━${NC}"
-            echo ""
+            printf "%s━━━ %s ━━━%s\n\n" "${BOLD}${CYAN}" "$p" "${NC}"
             _print_search_header
             pm_search_formatted "$t" "$p" 2>/dev/null || true
             echo ""
@@ -1057,7 +1015,7 @@ run_search() {
         pids+=($!)
         idx=$((idx + 1))
       done
-      # Wait for all and print in original order
+      local pid
       for pid in "${pids[@]}"; do
         wait "$pid" 2>/dev/null || true
       done
@@ -1068,7 +1026,7 @@ run_search() {
       done
       rm -rf "$tmpdir"
     else
-      # Sequential (default)
+      local p
       for p in "${to_search[@]}"; do
         log_header "$p"
         _print_search_header
@@ -1087,6 +1045,7 @@ run_search() {
 
   if [ ${#pm_nums[@]} -gt 0 ]; then
     local selected=()
+    local n
     for n in "${pm_nums[@]}"; do
       if [ "$n" -ge 1 ] && [ "$n" -le "${#pms[@]}" ]; then
         selected+=("${pms[$((n-1))]}")
@@ -1102,6 +1061,7 @@ run_search() {
   else
     echo "Search in which PM? (enter = all, or space-separated numbers e.g. 1 2)"
     local i=1
+    local p
     for p in "${pms[@]}"; do echo "  $i) $p"; i=$((i+1)); done
     printf "Choice [default=all]: "
     read -r choice
@@ -1112,6 +1072,7 @@ run_search() {
       local selected=()
       local chosen_nums
       read -ra chosen_nums <<< "$choice"
+      local n
       for n in "${chosen_nums[@]}"; do
         if [[ "$n" =~ ^[0-9]+$ ]] && [ "$n" -ge 1 ] && [ "$n" -le "${#pms[@]}" ]; then
           selected+=("${pms[$((n-1))]}")
@@ -1133,6 +1094,7 @@ run_sync() {
 
   local tmp
   tmp=$(mktemp)
+  local pm
   for pm in $(detect_available_pms); do
     pm_list_installed "$pm" 2>/dev/null | while IFS= read -r pkg; do
       [ -n "$pkg" ] && echo "$pm:$pkg" >> "$tmp"
@@ -1141,7 +1103,6 @@ run_sync() {
   sort -u "$tmp" | grep -v '^$' > "${PACKAGES_CONF}.new" || true
   rm -f "$tmp"
 
-  # Atomic write with header
   local atomic_tmp
   atomic_tmp=$(mktemp "${PACKAGES_CONF}.XXXXXX")
   {
@@ -1165,8 +1126,6 @@ run_sync() {
   log_success "Synced packages and desktop state to $PACKAGES_CONF"
 }
 
-# Apply: install each package using its RECORDED PM (reproducible restore)
-# Supports --parallel to run installs across different PMs concurrently
 run_apply() {
   require_initialized
   log_header "Apply: install all packages using recorded package managers"
@@ -1185,8 +1144,8 @@ run_apply() {
     _run_apply_sequential
   fi
 
-  # Deploy tracked dotfiles
   if [ -f "$TRACKED_DOTFILES" ]; then
+    local rel
     while IFS= read -r rel; do
       [ -z "$rel" ] && continue
       local src="$DOTFILES_DIR/$rel"
@@ -1208,11 +1167,18 @@ run_apply() {
 
 _run_apply_sequential() {
   local count=0
+  local line
   while IFS= read -r line; do
-    [[ "$line" == \#* ]] || [ -z "$line" ] && continue
+    # FIX: proper guard instead of short-circuit && chain
+    if [[ "$line" == \#* ]] || [ -z "$line" ]; then
+      continue
+    fi
     _parse_conf_line "$line"
     local pm="$PARSED_PM" pkg="$PARSED_PKG" version="$PARSED_VERSION"
-    [ -z "$pm" ] || [ -z "$pkg" ] && continue
+    # FIX: proper guard instead of [ -z ] || [ -z ] && continue
+    if [ -z "$pm" ] || [ -z "$pkg" ]; then
+      continue
+    fi
     if pm_available "$pm" && ! pm_is_installed "$pm" "$pkg" 2>/dev/null; then
       if [ "${DRY_RUN:-false}" = "true" ]; then
         local label="$pm:$pkg"
@@ -1220,7 +1186,9 @@ _run_apply_sequential() {
         log_info "[dry-run] would install: $label"
       else
         log_info "Installing $pkg via $pm${version:+ (=$version)}"
-        pm_install "$pm" "$pkg" "$version" && count=$((count+1))
+        if pm_install "$pm" "$pkg" "$version"; then
+          count=$((count+1))
+        fi
       fi
     fi
   done < "$PACKAGES_CONF"
@@ -1228,14 +1196,19 @@ _run_apply_sequential() {
 }
 
 _run_apply_parallel() {
-  # Group packages by PM so we only run one instance of each PM at a time
-  # (apt/dnf/etc. hold locks). Different PMs run in parallel.
   declare -A PM_PKGS
+  local line
   while IFS= read -r line; do
-    [[ "$line" == \#* ]] || [ -z "$line" ] && continue
+    # FIX: proper guard
+    if [[ "$line" == \#* ]] || [ -z "$line" ]; then
+      continue
+    fi
     _parse_conf_line "$line"
     local pm="$PARSED_PM" pkg="$PARSED_PKG" version="$PARSED_VERSION"
-    [ -z "$pm" ] || [ -z "$pkg" ] && continue
+    # FIX: proper guard
+    if [ -z "$pm" ] || [ -z "$pkg" ]; then
+      continue
+    fi
     if pm_available "$pm" && ! pm_is_installed "$pm" "$pkg" 2>/dev/null; then
       local entry="$pkg"
       [ -n "$version" ] && entry="${pkg}=${version}"
@@ -1244,17 +1217,19 @@ _run_apply_parallel() {
   done < "$PACKAGES_CONF"
 
   local pids=()
+  local pm
   for pm in "${!PM_PKGS[@]}"; do
     (
+      local entry
       for entry in ${PM_PKGS[$pm]}; do
-        local pkg="${entry%%=*}"
-        local version=""
-        [[ "$entry" == *=* ]] && version="${entry#*=}"
+        local epkg="${entry%%=*}"
+        local eversion=""
+        [[ "$entry" == *=* ]] && eversion="${entry#*=}"
         if [ "${DRY_RUN:-false}" = "true" ]; then
           log_info "[dry-run] would install: $pm:$entry"
         else
-          log_info "Installing $pkg via $pm${version:+ (=$version)}"
-          pm_install "$pm" "$pkg" "$version" || log_warning "Failed to install $pkg via $pm"
+          log_info "Installing $epkg via $pm${eversion:+ (=$eversion)}"
+          pm_install "$pm" "$epkg" "$eversion" || log_warning "Failed to install $epkg via $pm"
         fi
       done
     ) &
@@ -1262,6 +1237,7 @@ _run_apply_parallel() {
   done
 
   local failed=0
+  local pid
   for pid in "${pids[@]}"; do
     wait "$pid" || failed=$((failed+1))
   done
@@ -1287,11 +1263,15 @@ run_restore_desktop() {
 
 run_track() {
   require_initialized
+  local f
   for f in "$@"; do
     local abs
     abs=$(cd "$(dirname "$f")" 2>/dev/null && pwd)/$(basename "$f")
     [ -f "$abs" ] || abs="$HOME/$f"
-    [ -f "$abs" ] || { log_error "File not found: $f"; continue; }
+    if [ ! -f "$abs" ]; then
+      log_error "File not found: $f"
+      continue
+    fi
     local rel="${abs#"$HOME"/}"
     local dest="$DOTFILES_DIR/$rel"
     mkdir -p "$(dirname "$dest")"
@@ -1304,6 +1284,7 @@ run_track() {
 
 run_untrack() {
   require_initialized
+  local f
   for f in "$@"; do
     local rel="${f#"$HOME"/}"
     [[ "$rel" == "$f" ]] && rel="$f"
@@ -1340,9 +1321,16 @@ run_restore() {
   [ -z "$path" ] && { log_error "Usage: pdrx restore <backup-path>"; exit 1; }
   [ ! -d "$path" ] && { log_error "Not found: $path"; exit 1; }
 
-  [ "${DRY_RUN:-false}" = "true" ] && { log_info "[dry-run] would restore from $path"; return 0; }
-  [ "${YES:-false}" != "true" ] \
-    && { printf "Restore from %s? [y/N]: " "$path"; read -r r; [[ "$r" =~ ^[Yy]$ ]] || return 0; }
+  if [ "${DRY_RUN:-false}" = "true" ]; then
+    log_info "[dry-run] would restore from $path"
+    return 0
+  fi
+  if [ "${YES:-false}" != "true" ]; then
+    printf "Restore from %s? [y/N]: " "$path"
+    local r
+    read -r r
+    [[ "$r" =~ ^[Yy]$ ]] || return 0
+  fi
 
   [ -f "$path/packages.conf" ]    && cp "$path/packages.conf" "$PACKAGES_CONF"
   [ -d "$path/desktop-export" ]   && rm -rf "$DESKTOP_EXPORT" && cp -R "$path/desktop-export" "$DESKTOP_EXPORT"
@@ -1351,7 +1339,6 @@ run_restore() {
   log_success "Restored from $path"
 }
 
-# List backup dirs oldest-first (chronological order by timestamp in name)
 _list_backup_dirs_oldest_first() {
   [ ! -d "$PDRX_BACKUP" ] && return 0
   # shellcheck disable=SC2012
@@ -1406,6 +1393,7 @@ run_clean() {
   fi
 
   local dirs=()
+  local d
   while IFS= read -r d; do
     [ -n "$d" ] && [ -d "$PDRX_BACKUP/$d" ] && dirs+=("$d")
   done < <(_list_backup_dirs_oldest_first)
@@ -1418,8 +1406,13 @@ run_clean() {
 
   case "$arg" in
     all)
-      [ "${YES:-false}" != "true" ] \
-        && { printf "Remove ALL %d backup(s)? [y/N]: " "$total"; read -r r; [[ "$r" =~ ^[Yy]$ ]] || return 0; }
+      if [ "${YES:-false}" != "true" ]; then
+        printf "Remove ALL %d backup(s)? [y/N]: " "$total"
+        local r
+        read -r r
+        [[ "$r" =~ ^[Yy]$ ]] || return 0
+      fi
+      local d
       for d in "${dirs[@]}"; do
         [ -z "$d" ] && continue
         rm -rf "${PDRX_BACKUP:?}/$d"
@@ -1430,21 +1423,31 @@ run_clean() {
       [ "$total" -lt 1 ] && return 0
       local newest="${dirs[$((total - 1))]}"
       [ -z "$newest" ] && return 0
-      [ "${YES:-false}" != "true" ] \
-        && { printf "Remove newest backup '%s'? [y/N]: " "$newest"; read -r r; [[ "$r" =~ ^[Yy]$ ]] || return 0; }
+      if [ "${YES:-false}" != "true" ]; then
+        printf "Remove newest backup '%s'? [y/N]: " "$newest"
+        local r
+        read -r r
+        [[ "$r" =~ ^[Yy]$ ]] || return 0
+      fi
       rm -rf "${PDRX_BACKUP:?}/$newest"
       log_success "Removed ${PDRX_BACKUP}/$newest"
       ;;
     *-*)
-      local r1 r2 low high i
-      r1="${arg%-*}"
-      r2="${arg#*-}"
-      low=$((r1 < r2 ? r1 : r2))
-      high=$((r1 > r2 ? r1 : r2))
-      [ "$low" -lt 1 ] || [ "$high" -gt "$total" ] \
-        && { log_error "Range must be 1-$total"; exit 1; }
-      [ "${YES:-false}" != "true" ] \
-        && { printf "Remove backups %d through %d? [y/N]: " "$low" "$high"; read -r r; [[ "$r" =~ ^[Yy]$ ]] || return 0; }
+      local r1="${arg%-*}"
+      local r2="${arg#*-}"
+      local low=$((r1 < r2 ? r1 : r2))
+      local high=$((r1 > r2 ? r1 : r2))
+      if [ "$low" -lt 1 ] || [ "$high" -gt "$total" ]; then
+        log_error "Range must be 1-$total"
+        exit 1
+      fi
+      if [ "${YES:-false}" != "true" ]; then
+        printf "Remove backups %d through %d? [y/N]: " "$low" "$high"
+        local r
+        read -r r
+        [[ "$r" =~ ^[Yy]$ ]] || return 0
+      fi
+      local i
       for ((i = low; i <= high; i++)); do
         local idx=$((i - 1))
         local dname="${dirs[$idx]:-}"
@@ -1453,13 +1456,19 @@ run_clean() {
       ;;
     *)
       if [[ "$arg" =~ ^[0-9]+$ ]]; then
-        [ "$arg" -lt 1 ] || [ "$arg" -gt "$total" ] \
-          && { log_error "Ref must be 1-$total"; exit 1; }
+        if [ "$arg" -lt 1 ] || [ "$arg" -gt "$total" ]; then
+          log_error "Ref must be 1-$total"
+          exit 1
+        fi
         local idx=$((arg - 1))
         local dname="${dirs[$idx]}"
         [ -z "$dname" ] && return 0
-        [ "${YES:-false}" != "true" ] \
-          && { printf "Remove backup '%s'? [y/N]: " "$dname"; read -r r; [[ "$r" =~ ^[Yy]$ ]] || return 0; }
+        if [ "${YES:-false}" != "true" ]; then
+          printf "Remove backup '%s'? [y/N]: " "$dname"
+          local r
+          read -r r
+          [[ "$r" =~ ^[Yy]$ ]] || return 0
+        fi
         rm -rf "${PDRX_BACKUP:?}/$dname"
         log_success "Removed ${PDRX_BACKUP}/$dname"
       else
@@ -1473,11 +1482,21 @@ run_clean() {
 run_rollback() {
   require_initialized
   local n="${1:-1}"
-  local dir
-  # shellcheck disable=SC2012
-  dir=$(ls -1t "$PDRX_BACKUP" 2>/dev/null | sed -n "${n}p")
-  [ -z "$dir" ] && { log_error "No backup #$n"; exit 1; }
-  run_restore "$PDRX_BACKUP/$dir"
+  local dirs=()
+  local d
+  # Use oldest-first list, then count from end for "most recent = N"
+  while IFS= read -r d; do
+    [ -n "$d" ] && dirs+=("$d")
+  done < <(_list_backup_dirs_oldest_first)
+  local total=${#dirs[@]}
+  [ "$total" -eq 0 ] && { log_error "No backups found"; exit 1; }
+  # N=1 means most recent (last in oldest-first list)
+  local idx=$(( total - n ))
+  if [ "$idx" -lt 0 ]; then
+    log_error "No backup #$n (only $total backup(s) exist)"
+    exit 1
+  fi
+  run_restore "$PDRX_BACKUP/${dirs[$idx]}"
 }
 
 run_export() {
@@ -1505,6 +1524,7 @@ run_import() {
 
 run_update() {
   require_initialized
+  local pm
   for pm in $(detect_available_pms); do
     log_info "Updating $pm index..."
     pm_update "$pm" 2>/dev/null || log_warning "Update failed for $pm"
@@ -1514,6 +1534,7 @@ run_update() {
 
 run_upgrade() {
   require_initialized
+  local pm
   for pm in $(detect_available_pms); do
     log_info "Upgrading packages via $pm..."
     pm_upgrade "$pm" 2>/dev/null || log_warning "Upgrade failed for $pm"
@@ -1530,11 +1551,15 @@ run_destroy() {
   echo ""
   echo "Installed packages will NOT be uninstalled."
   echo ""
-  [ "${YES:-false}" != "true" ] \
-    && { printf "Type 'yes' to continue: "; read -r r; [ "$r" != "yes" ] && return 0; }
+  if [ "${YES:-false}" != "true" ]; then
+    printf "Type 'yes' to continue: "
+    local r
+    read -r r
+    [ "$r" != "yes" ] && return 0
+  fi
 
-  # Restore tracked dotfiles
   if [ -f "$TRACKED_DOTFILES" ]; then
+    local rel
     while IFS= read -r rel; do
       [ -z "$rel" ] && continue
       local dest="$HOME/$rel"
@@ -1554,6 +1579,7 @@ run_destroy() {
 
   rm -rf "$PDRX_HOME"
   [ -f "$HOME/.local/bin/pdrx" ] && rm -f "$HOME/.local/bin/pdrx"
+  local rc
   for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
     if [ -f "$rc" ]; then
       # shellcheck disable=SC2016
@@ -1574,8 +1600,9 @@ run_install_self() {
   mkdir -p "$install_dir"
   cp "$self" "$install_dir/pdrx"
   chmod +x "$install_dir/pdrx"
-  # shellcheck disable=SC2016  # intentional: literal $PATH/$HOME written into rc file
+  # shellcheck disable=SC2016
   local path_line='export PATH="$PATH:$HOME/.local/bin"'
+  local rc
   for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
     if [ -f "$rc" ]; then
       if ! grep -q '\.local/bin' "$rc"; then
@@ -1584,6 +1611,50 @@ run_install_self() {
     fi
   done
   log_success "Installed to $install_dir/pdrx. Run: source ~/.bashrc && pdrx init"
+}
+
+# =============================================================================
+# SELF-UPDATE
+# =============================================================================
+
+run_self_update() {
+  log_header "Self-update pdrx"
+  local install_path
+  install_path="$(get_script_path)"
+  local remote_version
+  local remote_url="https://raw.githubusercontent.com/stefan-hacks/pdrx/main/pdrx"
+
+  if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+    log_error "curl or wget is required for self-update"
+    exit 1
+  fi
+
+  log_info "Checking latest version..."
+  local tmp
+  tmp=$(mktemp)
+  if command -v curl >/dev/null 2>&1; then
+    curl -sSL "$remote_url" -o "$tmp" || { log_error "Failed to download update"; rm -f "$tmp"; exit 1; }
+  else
+    wget -qO "$tmp" "$remote_url" || { log_error "Failed to download update"; rm -f "$tmp"; exit 1; }
+  fi
+
+  remote_version=$(grep '^VERSION=' "$tmp" | head -1 | cut -d'"' -f2)
+  if [ -z "$remote_version" ]; then
+    log_error "Could not determine remote version"
+    rm -f "$tmp"
+    exit 1
+  fi
+
+  if [ "$remote_version" = "$VERSION" ]; then
+    log_info "Already up to date (v$VERSION)"
+    rm -f "$tmp"
+    return 0
+  fi
+
+  log_info "Updating $VERSION → $remote_version"
+  chmod +x "$tmp"
+  mv "$tmp" "$install_path"
+  log_success "Updated pdrx to v$remote_version. Re-run pdrx to use the new version."
 }
 
 # =============================================================================
@@ -1625,11 +1696,12 @@ ${BOLD}COMMANDS:${NC}
   restore PATH                    Restore config from backup path
   generations                     List backups with reference numbers
   clean [ARG]                     Clean backups: all|current|<ref>|<ref1-ref2>
-  rollback [N]                    Rollback to Nth most-recent backup
+  rollback [N]                    Rollback to Nth most-recent backup (default: 1 = newest)
   sync-desktop                    Export desktop/DE state
   sync-desktop --restore          Restore desktop state
   update                          Refresh all PM package indexes
   upgrade                         Upgrade all packages via each PM
+  self-update                     Update pdrx itself to the latest version
   export [FILE]                   Export config as tarball
   import FILE                     Import config from tarball
   destroy                         Restore dotfiles and remove pdrx (-y skips prompt)
@@ -1641,23 +1713,17 @@ ${BOLD}DECLARATIVE FORMAT (packages.conf):${NC}
   pm:package              unpinned (default)
   pm:package=version      pinned version (written by install --pin)
 
-  Examples:
-    apt:vim
-    apt:vim=2:9.0.1672-1
-    cargo:ripgrep
-    cargo:ripgrep=14.1.0
-    winget:Vim.Vim
-
 ${BOLD}EXAMPLES:${NC}
   pdrx install vim                    # interactive PM selection
   pdrx install --pm apt vim           # install via apt
   pdrx install --pm cargo rg --pin    # install and pin current version
   pdrx install --pm apt vim --pin=9.0 # install specific version and pin
   pdrx remove vim                     # remove (uses recorded PM)
-  pdrx remove -n vim                  # dry-run: preview removal
+  pdrx -n remove vim                  # dry-run: preview removal
   pdrx search ripgrep --parallel      # search all PMs in parallel
   pdrx apply --parallel               # install all packages (parallel across PMs)
-  pdrx upgrade                        # upgrade all (prompts to install cargo-update if needed)
+  pdrx self-update                    # update pdrx to latest version
+  pdrx upgrade                        # upgrade all packages
 
 EOF
 }
@@ -1675,7 +1741,6 @@ DEBUG=false
 YES=false
 DRY_RUN=false
 
-# Parse global options
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help)    show_help; exit 0 ;;
@@ -1707,9 +1772,6 @@ shift
 
 log_debug "pdrx version: $VERSION"
 log_debug "PDRX_HOME=$PDRX_HOME"
-log_debug "PDRX_CONFIG=$PDRX_CONFIG"
-log_debug "PDRX_BACKUP=$PDRX_BACKUP"
-log_debug "PDRX_STATE=$PDRX_STATE"
 log_debug "command: $CMD $*"
 log_debug "initialized: $(is_initialized && echo yes || echo no)"
 
@@ -1745,6 +1807,7 @@ case "$CMD" in
     ;;
   update)      run_update "$@" ;;
   upgrade)     run_upgrade "$@" ;;
+  self-update) run_self_update ;;
   export)      run_export "$@" ;;
   import)      run_import "$@" ;;
   destroy)     run_destroy "$@" ;;
