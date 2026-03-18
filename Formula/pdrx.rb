@@ -21,7 +21,7 @@ class Pdrx < Formula
 
   # ── Stable release (updated by GitHub Actions on every git tag) ────────────
   url "https://github.com/stefan-hacks/pdrx/archive/refs/tags/v1.5.0.tar.gz"
-  sha256 "HOMEBREW_SHA256_PLACEHOLDER"
+  sha256 "6d9ac2bb907d8b82b85493af15fcf0f9077a884a16be98665733babe58ab4e14"
   version "1.5.0"
   license "MIT"
 
