@@ -20,9 +20,9 @@ class Pdrx < Formula
   homepage "https://github.com/stefan-hacks/pdrx"
 
   # ── Stable release (updated by GitHub Actions on every git tag) ────────────
-  url "https://github.com/stefan-hacks/pdrx/archive/refs/tags/v1.5.0.tar.gz"
-  sha256 "6d9ac2bb907d8b82b85493af15fcf0f9077a884a16be98665733babe58ab4e14"
-  version "1.5.0"
+  url "https://github.com/stefan-hacks/pdrx/archive/refs/tags/v1.6.0.tar.gz"
+  sha256 "bd7a1291cabddc0818dd0a42bc352082c462fa53526bf852e4166cbe46206e70"
+  version "1.6.0"
   license "MIT"
 
   # ── HEAD – always the very tip of main ────────────────────────────────────
