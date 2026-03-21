@@ -17,24 +17,31 @@ set -euo pipefail
 
 # ── Config ────────────────────────────────────────────────────────────────────
 REPO="stefan-hacks/pdrx"
-TAG="v1.5.0"
+TAG="v1.6.0"
 VERSION="${TAG#v}"
 FORMULA="Formula/pdrx.rb"
 BRANCH="main"
 # ─────────────────────────────────────────────────────────────────────────────
 
-RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'
-CYAN=$'\033[0;36m'; BOLD=$'\033[1m'; NC=$'\033[0m'
+RED=$'\033[0;31m'
+GREEN=$'\033[0;32m'
+YELLOW=$'\033[1;33m'
+CYAN=$'\033[0;36m'
+BOLD=$'\033[1m'
+NC=$'\033[0m'
 
-info()    { echo "${CYAN}[info]${NC} $*"; }
+info() { echo "${CYAN}[info]${NC} $*"; }
 success() { echo "${GREEN}[ok]${NC}   $*"; }
-warn()    { echo "${YELLOW}[warn]${NC} $*"; }
-die()     { echo "${RED}[error]${NC} $*" >&2; exit 1; }
+warn() { echo "${YELLOW}[warn]${NC} $*"; }
+die() {
+  echo "${RED}[error]${NC} $*" >&2
+  exit 1
+}
 
 # ── Sanity checks ─────────────────────────────────────────────────────────────
-[ -f "pdrx" ]       || die "Run this script from the root of the pdrx repo."
-[ -f "$FORMULA" ]   || die "$FORMULA not found."
-command -v git      >/dev/null 2>&1 || die "git not found."
+[ -f "pdrx" ] || die "Run this script from the root of the pdrx repo."
+[ -f "$FORMULA" ] || die "$FORMULA not found."
+command -v git >/dev/null 2>&1 || die "git not found."
 if command -v curl >/dev/null 2>&1; then HAS_CURL=true; else HAS_CURL=false; fi
 if command -v wget >/dev/null 2>&1; then HAS_WGET=true; else HAS_WGET=false; fi
 "$HAS_CURL" || "$HAS_WGET" || die "curl or wget is required."
