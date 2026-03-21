@@ -103,20 +103,6 @@ Then initialise:
 pdrx init
 ```
 
-### Homebrew (macOS / Linux)
-
-Installs the binary and the `man pdrx` page in one step:
-
-```bash
-brew tap stefan-hacks/pdrx https://github.com/stefan-hacks/pdrx
-brew install pdrx
-pdrx init
-```
-
-Upgrade to the latest release:
-
-```bash
-brew upgrade pdrx
 # or, from any install method:
 pdrx self-update
 ```
