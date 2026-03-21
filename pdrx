@@ -109,38 +109,77 @@ pm_available() {
 }
 
 pm_list_installed() {
+  # Returns ONLY user-initiated packages — excludes OS defaults, auto-deps,
+  # and packages pulled in as transitive requirements by other tools.
+  # Used by `pdrx sync` so the declarative config stays minimal and clean.
   local pm="$1"
   case "$pm" in
     apt)
-      dpkg-query -f '${Package}\n' -W 2>/dev/null \
-        || apt list --installed 2>/dev/null | awk -F/ 'NR>1 {print $1}' | sort -u
+      # apt-mark showmanual lists only packages the user explicitly installed.
+      # Packages installed as dependencies (auto) or as part of the base OS
+      # image are marked 'auto' and therefore excluded.
+      apt-mark showmanual 2>/dev/null | sort
       ;;
-    dnf|yum)
-      "$pm" list installed 2>/dev/null | awk 'NR>1 {print $1}' | sed 's/\..*$//'
+    dnf)
+      # --userinstalled excludes packages pulled in by the OS installer.
+      # Fall back to history userinstalled on older dnf that lacks the flag.
+      if dnf repoquery --userinstalled --qf '%{name}' >/dev/null 2>&1; then
+        dnf repoquery --userinstalled --qf '%{name}' 2>/dev/null \
+          | grep -v '^$' | sort -u
+      else
+        dnf history userinstalled 2>/dev/null \
+          | awk 'NR>1 {print $1}' | sed 's/\..*//' | sort -u
+      fi
+      ;;
+    yum)
+      # yum (RHEL 7 / CentOS 7) history userinstalled approximates the same.
+      yum history userinstalled 2>/dev/null \
+        | awk 'NR>1 {print $1}' | sed 's/\..*//' | sort -u \
+        || yum list installed 2>/dev/null \
+             | awk 'NR>1 {print $1}' | sed 's/\..*//' | sort -u
       ;;
     pacman)
-      pacman -Qq 2>/dev/null
+      # -Qe = explicitly installed by the user; excludes everything that was
+      # pulled in as a dependency (-Qd).  -q suppresses version numbers.
+      pacman -Qeq 2>/dev/null
       ;;
     zypper)
-      zypper -q packages --installed-only 2>/dev/null \
-        | awk -F'|' 'NR>3 {gsub(/^ +| +$/,"",$3); if($3!="" && $3!="Name") print $3}'
+      # --userinstalled filters to packages whose install reason is "user";
+      # fall back to --installed-only if the flag isn't available (older zypper).
+      zypper -q packages --userinstalled 2>/dev/null \
+        | awk -F'|' 'NR>3 {gsub(/^ +| +$/,"",$3); if($3!="" && $3!="Name") print $3}' \
+        || zypper -q packages --installed-only 2>/dev/null \
+             | awk -F'|' 'NR>3 {gsub(/^ +| +$/,"",$3); if($3!="" && $3!="Name") print $3}'
       ;;
     brew)
-      brew list --formula 2>/dev/null
+      # `brew leaves --installed-on-request` lists formulae the user asked for
+      # directly, omitting everything Homebrew installed as a dependency.
+      # Casks are always user-requested, so list them all.
+      brew leaves --installed-on-request 2>/dev/null
       brew list --cask 2>/dev/null
       ;;
     flatpak)
+      # Every Flatpak app is user-initiated — Flatpak never auto-installs apps.
+      # (Runtimes are handled separately and intentionally excluded here.)
       flatpak list --app --columns=application 2>/dev/null \
         || flatpak list --app 2>/dev/null | awk '{print $1}'
       ;;
     snap)
-      snap list 2>/dev/null | awk 'NR>1 {print $1}'
+      # Skip the built-in core and snapd snaps which are present on every
+      # Ubuntu/snap-enabled system and not user-chosen.
+      snap list 2>/dev/null \
+        | awk 'NR>1 && $1!="core" && $1!="core18" && $1!="core20" \
+                    && $1!="core22" && $1!="core24" && $1!="snapd" {print $1}'
       ;;
     cargo)
+      # Every entry in `cargo install --list` was placed there by the user;
+      # Cargo has no concept of auto-installed crates.
       cargo install --list 2>/dev/null | grep '^[a-z]' | sed 's/:$//' | awk '{print $1}'
       ;;
     winget)
-      winget list 2>/dev/null | awk 'NR>3 && NF>=1 {print $1}'
+      # Limit to packages sourced from the winget repo, which excludes
+      # pre-installed Windows system components and machine-wide store apps.
+      winget list --source winget 2>/dev/null | awk 'NR>3 && NF>=1 {print $1}'
       ;;
     *)
       return 1
@@ -1001,9 +1040,21 @@ run_search() {
       local pids=()
       local idx=0
       local p
+
+      # Announce every PM we are about to query so the user sees immediate
+      # activity, then buffer each PM's results so the final display is
+      # coherent (no interleaved result rows from different PMs).
+      printf "\n%sSearching '%s' across %d package manager(s)…%s\n\n" \
+        "${BOLD}${CYAN}" "$t" "${#to_search[@]}" "${NC}"
+      for p in "${to_search[@]}"; do
+        printf "  %s[queued]%s %s\n" "${YELLOW}" "${NC}" "$p"
+      done
+      echo ""
+
       for p in "${to_search[@]}"; do
         local outfile="$tmpdir/${idx}_${p}"
-        {
+        local donefile="$tmpdir/${idx}_${p}.done"
+        (
           {
             echo ""
             printf "%s━━━ %s ━━━%s\n\n" "${BOLD}${CYAN}" "$p" "${NC}"
@@ -1011,16 +1062,25 @@ run_search() {
             pm_search_formatted "$t" "$p" 2>/dev/null || true
             echo ""
           } > "$outfile"
-        } &
+          touch "$donefile"
+        ) &
         pids+=($!)
         idx=$((idx + 1))
       done
+
+      # Wait for each PM in spawn order; print a live status line as each
+      # one finishes, then display its buffered results immediately so the
+      # user sees output flowing in rather than a single wall at the end.
+      idx=0
       local pid
       for pid in "${pids[@]}"; do
+        p="${to_search[$idx]}"
         wait "$pid" 2>/dev/null || true
-      done
-      idx=0
-      for p in "${to_search[@]}"; do
+        if [ -f "$tmpdir/${idx}_${p}.done" ]; then
+          printf "%s[done]%s %s\n" "${GREEN}" "${NC}" "$p"
+        else
+          printf "%s[error]%s %s (search failed)\n" "${RED}" "${NC}" "$p"
+        fi
         cat "$tmpdir/${idx}_${p}" 2>/dev/null || true
         idx=$((idx + 1))
       done
@@ -1196,56 +1256,142 @@ _run_apply_sequential() {
 }
 
 _run_apply_parallel() {
+  # ---------------------------------------------------------------------------
+  # Phase 1: build the per-PM install lists (sequential, cheap)
+  # ---------------------------------------------------------------------------
   declare -A PM_PKGS
+  local pm_group_count=0   # tracks whether any PM has work to do (avoids
+                            # ${#PM_PKGS[@]} which is unbound with set -u on
+                            # bash 5.2 when the array was never assigned a key)
   local line
   while IFS= read -r line; do
-    # FIX: proper guard
     if [[ "$line" == \#* ]] || [ -z "$line" ]; then
       continue
     fi
     _parse_conf_line "$line"
     local pm="$PARSED_PM" pkg="$PARSED_PKG" version="$PARSED_VERSION"
-    # FIX: proper guard
     if [ -z "$pm" ] || [ -z "$pkg" ]; then
       continue
     fi
     if pm_available "$pm" && ! pm_is_installed "$pm" "$pkg" 2>/dev/null; then
       local entry="$pkg"
       [ -n "$version" ] && entry="${pkg}=${version}"
+      if [ -z "${PM_PKGS[$pm]:-}" ]; then
+        pm_group_count=$((pm_group_count + 1))
+      fi
       PM_PKGS["$pm"]="${PM_PKGS[$pm]:-} $entry"
     fi
   done < "$PACKAGES_CONF"
 
-  local pids=()
+  if [ "$pm_group_count" -eq 0 ]; then
+    log_success "Apply (parallel): nothing to install — all packages already present"
+    return 0
+  fi
+
+  # ---------------------------------------------------------------------------
+  # Phase 2: print the full installation plan before anything runs
+  # ---------------------------------------------------------------------------
+  log_header "Apply (parallel): installation plan"
   local pm
+  for pm in $(echo "${!PM_PKGS[@]}" | tr ' ' '\n' | sort); do
+    local entries count label
+    read -ra entries <<< "${PM_PKGS[$pm]}"
+    count="${#entries[@]}"
+    label=$(printf '%s  ' "${entries[@]}")
+    printf "  %s%-10s%s %d package(s): %s\n" \
+      "${BOLD}${CYAN}" "[$pm]" "${NC}" "$count" "$label"
+  done
+  echo ""
+
+  # ---------------------------------------------------------------------------
+  # Phase 3: install all PM groups in parallel
+  #
+  # Design:
+  #   • A single lockfile serialises writes so no two subshells interleave a line.
+  #   • Every pm_install line is streamed live — output is NOT buffered to a
+  #     file first.  Each line is prefixed with [pm] and written atomically via
+  #     flock so the terminal stays readable.
+  #   • PIPESTATUS captures pm_install's real exit code through the prefix pipe.
+  #   • Each subshell exits non-zero if any package in its group failed, which
+  #     rolls up into the outer `failed` counter.
+  # ---------------------------------------------------------------------------
+  local lockfile
+  lockfile=$(mktemp)
+  # shellcheck disable=SC2064
+  trap "rm -f '$lockfile'" RETURN
+
+  local pids=()
   for pm in "${!PM_PKGS[@]}"; do
     (
+      local pm_ok=0 pm_fail=0
       local entry
+
+      # Helpers: write a tagged line to stdout, serialised across subshells.
+      _plog_info()    { flock "$lockfile" echo "${BLUE}[INFO]${NC}    ${CYAN}[$pm]${NC} $*"; }
+      _plog_ok()      { flock "$lockfile" echo "${GREEN}[OK]${NC}      ${CYAN}[$pm]${NC} $*"; }
+      _plog_warn()    { flock "$lockfile" echo "${YELLOW}[WARNING]${NC} ${CYAN}[$pm]${NC} $*"; }
+      _plog_err()     { flock "$lockfile" echo "${RED}[ERROR]${NC}   ${CYAN}[$pm]${NC} $*"; }
+      _plog_output()  { flock "$lockfile" echo "            ${CYAN}[$pm]${NC} $*"; }
+
+      _plog_info "starting — $(echo "${PM_PKGS[$pm]}" | wc -w) package(s) queued"
+
       for entry in ${PM_PKGS[$pm]}; do
         local epkg="${entry%%=*}"
         local eversion=""
         [[ "$entry" == *=* ]] && eversion="${entry#*=}"
+
         if [ "${DRY_RUN:-false}" = "true" ]; then
-          log_info "[dry-run] would install: $pm:$entry"
+          _plog_info "[dry-run] would install: $epkg${eversion:+ (=$eversion)}"
+          continue
+        fi
+
+        _plog_info "installing $epkg${eversion:+ (=$eversion)}..."
+
+        # Stream pm_install output live, one prefixed line at a time.
+        # flock ensures no two subshells interleave on a partial line.
+        # The `|| true` after the pipe prevents pipefail from killing the
+        # subshell before we can read PIPESTATUS.
+        pm_install "$pm" "$epkg" "$eversion" 2>&1 \
+          | while IFS= read -r pmline; do
+              _plog_output "$pmline"
+            done || true
+        local install_rc="${PIPESTATUS[0]}"
+
+        if [ "$install_rc" -eq 0 ]; then
+          _plog_ok "$epkg installed successfully"
+          pm_ok=$((pm_ok + 1))
         else
-          log_info "Installing $epkg via $pm${eversion:+ (=$eversion)}"
-          pm_install "$pm" "$epkg" "$eversion" || log_warning "Failed to install $epkg via $pm"
+          _plog_err "failed to install $epkg (exit $install_rc)"
+          pm_fail=$((pm_fail + 1))
         fi
       done
+
+      # Per-PM summary line when this group finishes
+      if [ "$pm_fail" -eq 0 ]; then
+        _plog_ok "group complete — $pm_ok installed, 0 failed"
+      else
+        _plog_warn "group complete — $pm_ok installed, $pm_fail failed"
+      fi
+
+      [ "$pm_fail" -gt 0 ] && exit 1 || exit 0
     ) &
     pids+=($!)
   done
 
+  # ---------------------------------------------------------------------------
+  # Phase 4: wait and report overall result
+  # ---------------------------------------------------------------------------
   local failed=0
   local pid
   for pid in "${pids[@]}"; do
-    wait "$pid" || failed=$((failed+1))
+    wait "$pid" || failed=$((failed + 1))
   done
 
+  echo ""
   if [ "$failed" -gt 0 ]; then
-    log_warning "Apply (parallel): $failed PM group(s) had errors"
+    log_warning "Apply (parallel): $failed PM group(s) had failures — review [ERROR] lines above"
   else
-    log_success "Apply (parallel): complete"
+    log_success "Apply (parallel): all groups complete"
   fi
 }
 
