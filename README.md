@@ -139,7 +139,7 @@ export MANPATH="$HOME/.local/share/man:$MANPATH"
 ## Quick Start
 
 ```bash
-pdrx init                                    # initialise config at ~/.pdrx
+pdrx init                                    # initialise config at ~/.pdrx or rename your directory whatever just make sure you know what its called.
 pdrx sync                                    # snapshot all currently installed packages
 pdrx install vim git                         # install; choose PM interactively
 pdrx install --pm flatpak org.gnome.GIMP     # install with a specific PM
