@@ -1957,6 +1957,19 @@ case "$CMD" in
   export)      run_export "$@" ;;
   import)      run_import "$@" ;;
   destroy)     run_destroy "$@" ;;
+  v2)
+    # Source the v2 module if it exists
+    PDRX_V2_SCRIPT="$(dirname "$(get_script_path)")/pdrx-v2"
+    if [ -f "$PDRX_V2_SCRIPT" ]; then
+      # shellcheck source=/dev/null
+      source "$PDRX_V2_SCRIPT"
+      cmd_v2 "$@"
+    else
+      log_error "v2.0 module not found at $PDRX_V2_SCRIPT"
+      log_info "This feature is only available in the v2.0-testing branch"
+      exit 1
+    fi
+    ;;
   *)
     log_error "Unknown command: $CMD"
     show_help
