@@ -16,7 +16,7 @@
 
 set -euo pipefail
 
-VERSION="1.7.2"
+VERSION="1.7.3"
 
 # =============================================================================
 # PORTABLE HELPERS
@@ -1908,13 +1908,13 @@ run_sync_dotfiles() {
   for file in "${common_dotfiles[@]}"; do
     local path="$HOME/$file"
     if [ -f "$path" ]; then
-      ((found++))
+      found=$((found + 1))
       local rel="$file"
       
       # Check if already tracked
       if [ -f "$TRACKED_DOTFILES" ] && grep -qFx "$rel" "$TRACKED_DOTFILES" 2>/dev/null; then
         log_info "Already tracked: $rel"
-        ((skipped++))
+        skipped=$((skipped + 1))
         continue
       fi
 
@@ -1925,7 +1925,7 @@ run_sync_dotfiles() {
       grep -qFx "$rel" "$TRACKED_DOTFILES" 2>/dev/null || echo "$rel" >> "$TRACKED_DOTFILES"
       ln -sf "$dest" "$path" 2>/dev/null || true
       log_success "Tracked: $rel"
-      ((tracked++))
+      tracked=$((tracked + 1))
     fi
   done
 

@@ -7,7 +7,7 @@
 **Portable Dynamic Reproducible gnu/linuX**
 
 <p>
-  <a href="https://github.com/stefan-hacks/pdrx/releases"><img src="https://img.shields.io/badge/version-1.7.2-58a6ff?style=flat-square" alt="version" /></a>
+  <a href="https://github.com/stefan-hacks/pdrx/releases"><img src="https://img.shields.io/badge/version-1.7.3-58a6ff?style=flat-square" alt="version" /></a>
   <a href="#"><img src="https://img.shields.io/badge/shell-bash-2ea043?style=flat-square" alt="bash" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8b949e?style=flat-square" alt="license" /></a>
 </p>
@@ -88,7 +88,7 @@ source ~/.bashrc
 ### Verify Installation
 
 ```bash
-pdrx --version    # Should show 1.7.2
+pdrx --version    # Should show 1.7.3
 pdrx init         # Creates ~/.pdrx/
 ```
 
@@ -171,7 +171,7 @@ brew:jq
 
 Track your configuration files with automatic symlinking:
 
-### Auto-Discover Common Dotfiles (New in 1.7.2)
+### Auto-Discover Common Dotfiles (New in 1.7.3)
 
 ```bash
 # Automatically find and track common dotfiles

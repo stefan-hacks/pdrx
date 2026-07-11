@@ -1,7 +1,7 @@
 .\" pdrx.1 - man page for pdrx
 .\" Portable Dynamic Reproducible gnu/linuX - reproducible Linux system setup
 .\" Use: groff -man -Tutf8 pdrx.1 | less
-.TH pdrx 1 "2025-07-11" "pdrx 1.7.2" "User Commands"
+.TH pdrx 1 "2025-07-11" "pdrx 1.7.3" "User Commands"
 .SH NAME
 pdrx \- Portable Dynamic Reproducible gnu/linuX: reproducible Linux system setup with declarative package config
 .SH SYNOPSIS
@@ -208,7 +208,7 @@ Stop tracking a dotfile and remove its copy from the config. Does not remove the
 .B pdrx untrack ~/.bashrc
 .RE
 .SS sync-dotfiles
-Auto-discover and track common dotfiles (new in 1.7.2). Searches for commonly used configuration files across shells and tools, automatically tracks any found files that are not already tracked, and creates symlinks. Reports config directories found but not auto-tracked (track these manually with \fBpdrx track\fR).
+Auto-discover and track common dotfiles (new in 1.7.3). Searches for commonly used configuration files across shells and tools, automatically tracks any found files that are not already tracked, and creates symlinks. Reports config directories found but not auto-tracked (track these manually with \fBpdrx track\fR).
 .PP
 Supported dotfiles include:
 .RS
