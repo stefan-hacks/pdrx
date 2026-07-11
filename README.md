@@ -1,561 +1,340 @@
-<p align="center">
-  <img src="icon_pdrx.png" width="160" alt="pdrx logo" />
+<div align="center">
+
+<img src="icon_pdrx.png" width="120" alt="pdrx" />
+
+# pdrx
+
+**Portable Dynamic Reproducible gnu/linuX**
+
+<p>
+  <a href="https://github.com/stefan-hacks/pdrx/releases"><img src="https://img.shields.io/badge/version-1.7.0-58a6ff?style=flat-square" alt="version" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/shell-bash-2ea043?style=flat-square" alt="bash" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8b949e?style=flat-square" alt="license" /></a>
 </p>
 
-<h1 align="center">pdrx</h1>
-<p align="center"><strong>Portable Dynamic Reproducible gnu/linuX</strong></p>
-<p align="center">
-  Pure Bash. No Nix. No Ansible. No stow.<br>
-  Install packages imperatively — get a declarative config automatically.
+<p>
+  <strong>Pure Bash. Zero dependencies. Imperative UX with declarative output.</strong>
 </p>
 
-<p align="center">
-  <img src="https://img.shields.io/badge/version-1.7.0-blue" alt="version" />
-  <img src="https://img.shields.io/badge/shell-bash-green" alt="bash" />
-  <img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="MIT" />
-  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-informational" alt="platform" />
-</p>
+</div>
 
 ---
 
-## What is pdrx?
+## ✨ What is pdrx?
 
-`pdrx` wraps your existing package managers so every install or remove you run **also updates a declarative config file** — automatically. No manual YAML. No Nix expressions.
-
-When you move to a new machine, `pdrx apply` reads that config and reproduces your exact setup using the same package manager that originally installed each package.
-
-```
-pdrx install --pm cargo ripgrep   →   records  cargo:ripgrep  in packages.conf
-pdrx install --pm apt vim         →   records  apt:vim
-pdrx install --pm flatpak org.gnome.GIMP  →  records  flatpak:org.gnome.GIMP
-
-# On new machine:
-pdrx apply    →   installs each package via its recorded PM, in the right order
-```
-
-> **Why record the package manager?** `ripgrep` is available from apt, brew, and cargo. Recording `cargo:ripgrep` means `apply` always reinstalls it with `cargo install`, not apt — keeping your setup truly identical across machines.
-
----
-
-## Table of Contents
-
-- [Features](#features)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [How the Declarative Config Works](#how-the-declarative-config-works)
-- [All Commands](#all-commands)
-- [Supported Package Managers](#supported-package-managers)
-- [Version Pinning](#version-pinning)
-- [Repository/PPA Sources](#repositoryppa-sources)
-- [Systemd Units](#systemd-units)
-- [Parallel Operations](#parallel-operations)
-- [Dotfile Tracking](#dotfile-tracking)
-- [Desktop Export & Restore](#desktop-export--restore)
-- [Backups & Rollback](#backups--rollback)
-- [Config Layout](#config-layout)
-- [Syncing to GitHub](#syncing-to-github)
-- [Multi-Machine & Multi-Profile Setup](#multi-machine--multi-profile-setup)
-- [Workflow: Desktop User](#workflow-desktop-user)
-- [Workflow: Developer](#workflow-developer)
-- [License](#license)
-
----
-
-## Features
-
-| | |
-|---|---|
-| 🐧 **All major distros** | Debian, Ubuntu, Fedora, Arch, openSUSE, and more |
-| 📦 **10 package managers** | apt, dnf, yum, pacman, zypper, brew, flatpak, snap, cargo, winget |
-| 📝 **Auto declarative config** | Every install/remove updates `packages.conf` instantly |
-| 🔁 **Reproducible restore** | `pdrx apply` reinstalls everything via the exact same PM |
-| 📌 **Optional version pinning** | `--pin` locks a specific version; unpinned is the default |
-| 📚 **Repository sources** | Track PPAs, repos, flatpak remotes (new in 1.7.0) |
-| ⚙️ **Systemd units** | Track enabled system and user units (new in 1.7.0) |
-| 🪝 **Post-apply hooks** | Custom automation that runs after apply (new in 1.7.0) |
-| 🔒 **Hardened updates** | SHA256-verified self-updates from releases (new in 1.7.0) |
-| ⚡ **Parallel operations** | `--parallel` on `apply` and `search` for speed |
-| 🖥️ **Desktop export** | GNOME, KDE, XFCE, i3, Sway, Hyprland settings backup |
-| 🗂️ **Dotfile tracking** | Symlink-based tracking for `~/.bashrc`, `~/.config/nvim`, etc. |
-| ⏱️ **Backups & rollback** | Timestamped generations, rollback to any point |
-| 📝 **Audit logging** | JSON-lines history of all state changes (new in 1.7.0) |
-| 🔄 **Self-update** | `pdrx self-update` fetches the latest version in-place |
-| 📤 **Export / Import** | Portable tarball for air-gapped transfers |
-
----
-
-## Installation
-
-### One-line install
-
-Installs to `~/.local/bin` and makes the script executable:
+`pdrx` wraps your existing package managers. Every install or remove automatically updates a declarative config file. No manual YAML. No Nix expressions. No complex setup.
 
 ```bash
-# curl
-mkdir -p ~/.local/bin && curl -sSL https://raw.githubusercontent.com/stefan-hacks/pdrx/main/pdrx -o ~/.local/bin/pdrx && chmod +x ~/.local/bin/pdrx
+# Install packages — your config updates automatically
+pdrx install vim git htop
+pdrx install --pm cargo ripgrep bat
+pdrx install --pm flatpak org.gnome.GIMP
 
-# wget
-mkdir -p ~/.local/bin && wget -qO ~/.local/bin/pdrx https://raw.githubusercontent.com/stefan-hacks/pdrx/main/pdrx && chmod +x ~/.local/bin/pdrx
+# Move to a new machine — restore everything
+pdrx apply
 ```
 
-Make sure `~/.local/bin` is on your PATH (add to `~/.bashrc` or `~/.zshrc` if needed):
+> **Why it works:** `pdrx` records which package manager installed each package. On a new machine, it reinstalls everything using the *same* package manager — keeping your setup truly identical.
+
+---
+
+## 🚀 Quick Start (60 seconds)
 
 ```bash
-export PATH="$HOME/.local/bin:$PATH"
-```
+# 1. Install pdrx
+curl -fsSL https://github.com/stefan-hacks/pdrx/releases/latest/download/pdrx -o ~/.local/bin/pdrx && chmod +x ~/.local/bin/pdrx
 
-Then initialise:
-
-```bash
+# 2. Initialize your config
 pdrx init
-pdrx self-update
+
+# 3. Capture your current system
+pdrx sync
+
+# 4. Start using it
+pdrx install neovim tmux ripgrep
+pdrx track ~/.bashrc ~/.config/nvim
+
+# 5. Check your setup
+pdrx status
 ```
 
-### Clone and install
+---
+
+## 📦 Installation
+
+### One-line Install
 
 ```bash
-git clone https://github.com/stefan-hacks/pdrx.git
-cd pdrx
-make install   # copies to ~/.local/bin + installs man page
-pdrx init
+# With curl
+mkdir -p ~/.local/bin && \
+curl -fsSL https://github.com/stefan-hacks/pdrx/releases/latest/download/pdrx -o ~/.local/bin/pdrx && \
+chmod +x ~/.local/bin/pdrx
 ```
 
-Or without Make:
+```bash
+# With wget
+mkdir -p ~/.local/bin && \
+wget -qO ~/.local/bin/pdrx https://github.com/stefan-hacks/pdrx/releases/latest/download/pdrx && \
+chmod +x ~/.local/bin/pdrx
+```
+
+Add to your PATH (if needed):
 
 ```bash
-./pdrx --install
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 source ~/.bashrc
-pdrx init
 ```
 
-### Man page (optional)
+### Verify Installation
 
 ```bash
-./install_manpage.sh --user     # installs to ~/.local/share/man (no root needed)
-sudo ./install_manpage.sh --system   # system-wide
-
-# If man pdrx doesn't find the page after --user install:
-export MANPATH="$HOME/.local/share/man:$MANPATH"
+pdrx --version    # Should show 1.7.0
+pdrx init         # Creates ~/.pdrx/
 ```
 
 ---
 
-## Quick Start
+## 🎯 Core Commands
+
+| Command | What it does |
+|---------|--------------|
+| `pdrx install <pkg>` | Install a package (auto-detects package manager) |
+| `pdrx install --pm apt <pkg>` | Force specific package manager |
+| `pdrx remove <pkg>` | Remove a package |
+| `pdrx list` | Show all tracked packages |
+| `pdrx search <pkg>` | Search across all package managers |
+| `pdrx apply` | Restore all packages from config |
+| `pdrx sync` | Capture currently installed packages |
+| `pdrx status` | Overview of your entire setup |
+
+### Examples
 
 ```bash
-pdrx init                                    # initialise config at ~/.pdrx
-pdrx sync                                    # snapshot all currently installed packages
-pdrx install vim git                         # install; choose PM interactively
-pdrx install --pm flatpak org.gnome.GIMP     # install with a specific PM
-pdrx install --pm cargo ripgrep --pin        # install + pin the exact version
-pdrx track ~/.bashrc ~/.config/nvim/init.vim # start tracking dotfiles
-pdrx backup initial                          # create a named backup checkpoint
-pdrx status                                  # overview of config, PMs, packages, sources, units
-```
+# Interactive package installation
+pdrx install vim git htop neofetch
 
----
+# Force a specific package manager
+pdrx install --pm flatpak org.gnome.GIMP org.telegram.desktop
+pdrx install --pm cargo ripgrep fd-find bat
 
-## How the Declarative Config Works
-
-`~/.pdrx/config/packages.conf` is the single source of truth for your setup. Every `pdrx install` and `pdrx remove` modifies it atomically.
-
-```
-# ~/.pdrx/config/packages.conf
-# Format: package_manager:package_name
-#         package_manager:package_name=version   (pinned)
-#
-# Synced: 2025-07-11T12:00:00+0000
-# OS: ubuntu
-
-apt:vim
-apt:git
-apt:vim=2:9.0.1672-1ubuntu3        ← pinned apt package
-flatpak:org.gnome.GIMP
-cargo:ripgrep
-cargo:ripgrep=14.1.0               ← pinned cargo crate
-brew:jq
-winget:Vim.Vim
-```
-
-### Add / Remove / Restore
-
-| Action | What happens |
-|--------|-------------|
-| `pdrx install vim` | Prompts for PM, installs, writes `apt:vim` (or whichever you chose) |
-| `pdrx install --pm flatpak org.gnome.GIMP` | Forces Flatpak, writes `flatpak:org.gnome.GIMP` |
-| `pdrx install --pm apt vim --pin` | Installs and records the current version: `apt:vim=2:9.0.1672-1` |
-| `pdrx remove vim` | Looks up the recorded PM, uninstalls, removes the line |
-| `pdrx -n remove vim` | Dry-run — shows what would be removed, no changes |
-| `pdrx apply` | Reads every `pm:package` line and installs via that PM (sources → packages → dotfiles → DE → systemd → hooks) |
-| `pdrx apply --parallel` | Same, but different PMs run concurrently |
-
-**Version pinning is opt-in.** The default behaviour is unpinned — `apply` always installs the latest. Only use `--pin` when you need to lock a specific version.
-
----
-
-## All Commands
-
-### Global flags (prefix any command)
-
-| Flag | Description |
-|------|-------------|
-| `-h`, `--help` | Show help |
-| `-v`, `--version` | Show version |
-| `-q`, `--quiet` | Suppress info output |
-| `-d`, `--debug` | Verbose debug output |
-| `-y`, `--yes` | Skip confirmation prompts |
-| `-n`, `--dry-run` | Preview changes without applying them |
-| `-c DIR`, `--config DIR` | Use `DIR` as the pdrx home (default: `~/.pdrx`) |
-| `--install` | Install pdrx to `~/.local/bin` and add to PATH |
-
-```bash
-pdrx -n apply               # dry-run: show what would be installed
-pdrx -y destroy             # remove pdrx without prompt
-pdrx -c /opt/work status    # use an alternate config directory
-```
-
-### Package management
-
-```bash
-pdrx install vim git htop                      # interactive PM selection
-pdrx install --pm apt vim git                    # force a specific PM
-pdrx install --pm cargo ripgrep bat --pin        # install + auto-pin installed version
-pdrx install --pm apt vim --pin=2:9.0.1672-1   # install + pin a specific version
-pdrx remove vim                                # remove using the recorded PM
-pdrx -n remove vim                             # preview removal
-pdrx list                                      # list all entries in packages.conf
-pdrx search ripgrep                            # search across all available PMs
-pdrx search vim 1 3                            # search only PM 1 and PM 3
-pdrx search ripgrep --parallel                 # search all PMs simultaneously
-pdrx sync                                      # re-snapshot all installed packages
-pdrx apply                                     # install everything in packages.conf
-pdrx apply --parallel                          # install across PMs in parallel
-pdrx update                                    # refresh PM package indexes (no upgrade)
-pdrx upgrade                                   # upgrade all packages via each PM
-```
-
-### Repository/PPA sources (new in 1.7.0)
-
-```bash
-pdrx source add apt ppa:deadsnakes/ppa                                 # add a PPA
-pdrx source add apt-repo 'deb [signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu jammy stable' /etc/apt/keyrings/docker.gpg https://download.docker.com/linux/ubuntu/gpg
-pdrx source add dnf https://download.docker.com/linux/fedora/docker-ce.repo
-pdrx source add zypper https://download.opensuse.org/.../repo.repo
-pdrx source add flatpak flathub https://flathub.org/repo/flathub.flatpakrepo
-pdrx source list                                                             # list all declared sources
-pdrx source apply                                                          # re-apply all declared sources
-```
-
-### Systemd units (new in 1.7.0)
-
-```bash
-pdrx sync              # captures enabled systemd units automatically
-# Enabled units are stored in ~/.pdrx/config/systemd.conf
-# Format: system:kanata.service  or  user:pipewire.service
-pdrx apply             # enables any units not yet enabled
-```
-
-### Post-apply hooks (new in 1.7.0)
-
-```bash
-pdrx hook edit         # create/edit ~/.pdrx/config/hooks/post-apply.sh
-# This script runs at the end of `pdrx apply` — use for custom automation
-# (e.g., reloading udev rules, enabling GNOME extensions)
-```
-
-### Audit log (new in 1.7.0)
-
-```bash
-pdrx history           # show last 30 state changes
-pdrx history 50        # show last 50 entries
-# Log file: ~/.pdrx/state/pdrx.log (JSON-lines)
-```
-
-### Dotfiles
-
-```bash
-pdrx track ~/.bashrc ~/.vimrc ~/.config/nvim/init.vim
-pdrx untrack ~/.bashrc
-```
-
-Tracking copies the file into `~/.pdrx/config/dotfiles/` and replaces the original with a symlink. `pdrx apply` redeploys tracked dotfiles on a new machine.
-
-### Backups & rollback
-
-```bash
-pdrx backup                         # timestamped backup (label: manual)
-pdrx backup before-upgrade          # backup with a custom label
-pdrx generations                    # list backups with reference numbers
-pdrx rollback                       # rollback to the most recent backup
-pdrx rollback 2                     # rollback to the 2nd most recent
-pdrx restore ~/.pdrx/backups/...    # restore from a specific path
-pdrx clean                          # list backups (interactive)
-pdrx clean all                      # delete all backups
-pdrx clean current                  # delete the newest backup
-pdrx clean 2-4                      # delete backups 2 through 4
-```
-
-### Desktop
-
-```bash
-pdrx sync-desktop              # export DE settings (GNOME/KDE/XFCE/i3/Sway/Hyprland)
-pdrx sync-desktop --restore    # restore DE settings from export
-```
-
-### Config & maintenance
-
-```bash
-pdrx init                          # initialise pdrx (run once)
-pdrx status                        # show config, PMs, package count, sources, units, hook
-pdrx export my-config.tar.gz       # export config as a tarball
-pdrx import my-config.tar.gz       # import from a tarball
-pdrx self-update                   # update pdrx itself (SHA256-verified, new in 1.7.0)
-pdrx destroy                       # restore dotfiles + remove pdrx completely
-pdrx -y destroy                    # same, skip confirmation
-```
-
----
-
-## Supported Package Managers
-
-| PM | Platform | Notes |
-|----|----------|-------|
-| `apt` | Debian, Ubuntu | System packages |
-| `dnf` | Fedora, RHEL 8+ | System packages |
-| `yum` | RHEL 7, CentOS | System packages |
-| `pacman` | Arch, Manjaro | System packages |
-| `zypper` | openSUSE | System packages |
-| `brew` | Any (Homebrew) | User packages, no sudo required |
-| `flatpak` | Any | Sandboxed apps |
-| `snap` | Ubuntu, others | Snaps |
-| `cargo` | Any (Rust) | `cargo install` crates; `upgrade` auto-installs `cargo-update` if needed |
-| `winget` | Windows | Use full package IDs, e.g. `Vim.Vim` |
-
-pdrx detects which of these are available on the current machine automatically.
-
----
-
-## Version Pinning
-
-Pinning is **opt-in**. By default, `pdrx apply` installs the latest version available. Use `--pin` only when exact version reproducibility matters.
-
-```bash
-# Unpinned (default) — always installs latest
-pdrx install --pm apt vim
-
-# Auto-pin: records whatever version actually gets installed
-pdrx install --pm apt vim --pin
-
-# Explicit pin: records and installs a specific version
+# Pin a specific version
 pdrx install --pm apt vim --pin=2:9.0.1672-1
-```
 
-Result in `packages.conf`:
-```
-apt:vim=2:9.0.1672-1
-```
+# Preview changes without applying
+pdrx -n remove vim
+pdrx -n apply
 
-When `pdrx apply` encounters a pinned entry, it uses the PM's native version syntax:
-
-| PM | Pinned install syntax |
-|----|-----------------------|
-| apt | `apt-get install pkg=version` |
-| dnf / yum | `dnf install pkg-version` |
-| zypper | `zypper install pkg=version` |
-| cargo | `cargo install pkg --version version` |
-| brew | `brew install pkg@version` |
-| winget | `winget install --id pkg --version version` |
-| snap | version treated as channel |
-| pacman / flatpak | CLI pinning not supported; installs latest and warns |
-
----
-
-## Repository/PPA Sources
-
-Track third-party sources so `pdrx apply` on a fresh machine can install packages that aren't in default distro repos (e.g., docker-ce, Google Chrome, Flathub).
-
-```bash
-# Add a PPA (requires add-apt-repository)
-pdrx source add apt ppa:deadsnakes/ppa
-
-# Add a raw apt repository with GPG key
-pdrx source add apt-repo 'deb [signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu jammy stable' /etc/apt/keyrings/docker.gpg https://download.docker.com/linux/ubuntu/gpg
-
-# Add a dnf repo (from .repo URL)
-pdrx source add dnf https://download.docker.com/linux/fedora/docker-ce.repo
-
-# Add a flatpak remote
-pdrx source add flatpak flathub https://flathub.org/repo/flathub.flatpakrepo
-```
-
-**How it works:**
-- `pdrx source add` runs the PM's native command to add the source AND records it in `~/.pdrx/config/sources.conf`
-- `pdrx source list` shows all declared sources
-- `pdrx source apply` re-adds all declared sources (useful on a fresh machine)
-- `pdrx apply` automatically runs `source apply` first, then packages
-
-**Note:** pacman repository sources are intentionally NOT supported — editing `/etc/pacman.conf` programmatically is high-risk.
-
----
-
-## Systemd Units
-
-Track which systemd units are enabled, so they can be re-enabled on a fresh machine.
-
-```bash
-# Automatically captured during sync
-pdrx sync    # records enabled units to ~/.pdrx/config/systemd.conf
-
-# Format in systemd.conf:
-# system:kanata.service    # system-wide unit
-# user:pipewire.service    # user unit
-```
-
-- Only **enabled** units are tracked (not masked, disabled, or installed-but-not-enabled)
-- System units require sudo; user units don't
-- `pdrx apply` enables any units not yet enabled
-
----
-
-## Parallel Operations
-
-### `apply --parallel`
-
-Groups packages by PM (so `apt` or `dnf` each run as a single invocation, respecting package manager locks), then runs each PM group as a background job. Different PMs install concurrently.
-
-```bash
+# Parallel installation (faster)
 pdrx apply --parallel
 ```
 
-### `search --parallel`
-
-Queries all selected PMs simultaneously. Output is buffered per PM and printed in the original order so results stay readable.
-
-```bash
-pdrx search ripgrep --parallel
-pdrx search vim 1 3 --parallel    # search only PMs 1 and 3, in parallel
-```
-
 ---
 
-## Dotfile Tracking
+## 📁 Configuration
 
-`pdrx track` copies a file into `~/.pdrx/config/dotfiles/` and replaces the original with a symlink pointing back to it. This means your dotfiles are stored inside `~/.pdrx`, which you can version-control and push to GitHub.
-
-```bash
-pdrx track ~/.bashrc ~/.vimrc ~/.config/nvim/init.vim ~/.tmux.conf
-```
-
-On `pdrx apply` (e.g. on a new machine), tracked dotfiles are deployed back to their original paths automatically.
-
-To stop tracking a file (removes the symlink, leaves the copy in place):
-
-```bash
-pdrx untrack ~/.bashrc
-```
-
-`pdrx destroy` reverses everything: it replaces symlinks with the real files before removing pdrx, so nothing is lost.
-
----
-
-## Desktop Export & Restore
-
-`pdrx sync-desktop` exports your desktop environment's configuration files and settings. Supported environments:
-
-- **GNOME** — dconf dump, gsettings, extensions, GTK themes
-- **KDE Plasma** — plasma/kwin/kscreen configs
-- **XFCE** — xfce4 and Thunar config
-- **i3** — config, i3status, i3blocks
-- **Sway** — config, waybar, swaync, foot
-- **Hyprland** — hypr config, waybar, wofi
-
-Common files (mimeapps, user-dirs, fontconfig, Xresources) are exported for all DEs.
-
-```bash
-pdrx sync-desktop              # export to ~/.pdrx/config/desktop-export/
-pdrx sync-desktop --restore    # restore from that export
-```
-
----
-
-## Backups & Rollback
-
-Every backup is a timestamped snapshot of your entire `~/.pdrx/config` — packages, sources, systemd units, dotfiles, hooks, and desktop export.
-
-```bash
-pdrx backup before-big-change     # create a checkpoint
-pdrx generations                  # list all backups, numbered oldest → newest
-```
-
-```
-  1) ~/.pdrx/backups/20250711_120000_initial
-  2) ~/.pdrx/backups/20250701_083000_before-big-change
-  ---
-  current  (active config, not a backup)
-```
-
-```bash
-pdrx rollback                     # restore from the most recent backup
-pdrx rollback 2                   # restore from backup #2 (second most recent)
-pdrx restore ~/.pdrx/backups/...  # restore from a specific path
-
-pdrx clean 1                      # remove backup #1
-pdrx clean 2-4                    # remove backups 2 through 4
-pdrx clean all                    # remove all backups
-pdrx clean current                # remove only the newest backup
-```
-
----
-
-## Config Layout
+Your entire system configuration lives in `~/.pdrx/`:
 
 ```
 ~/.pdrx/
 ├── config/
-│   ├── packages.conf          ← declarative packages (pm:package or pm:package=version)
-│   ├── sources.conf           ← repository/PPA/third-party sources (new in 1.7.0)
-│   ├── systemd.conf           ← enabled systemd units (new in 1.7.0)
-│   ├── dotfiles/              ← tracked dotfile copies (symlink targets)
-│   ├── desktop-export/        ← exported DE settings
-│   └── hooks/                 ← post-apply hook scripts
-├── backups/
-│   └── 20250711_120000_manual/
-│       ├── packages.conf
-│       ├── sources.conf
-│       ├── systemd.conf
-│       ├── desktop-export/
-│       ├── dotfiles/
-│       ├── hooks/
-│       └── tracked-dotfiles
+│   ├── packages.conf       # All tracked packages
+│   ├── sources.conf        # Repository/PPA sources
+│   ├── systemd.conf        # Enabled systemd units
+│   ├── dotfiles/           # Tracked dotfiles
+│   ├── desktop-export/     # Desktop environment settings
+│   └── hooks/              # Post-apply automation
+├── backups/                # Backup snapshots
 └── state/
-    ├── initialized
-    ├── version
-    ├── os-id
-    ├── tracked-dotfiles
-    ├── generations
-    └── pdrx.log               ← audit log (JSON-lines, new in 1.7.0)
+    ├── tracked-dotfiles    # Symlink tracking
+    └── pdrx.log           # Audit log
 ```
 
-Each backup is self-contained: `pdrx restore` copies the backup's config back, then `pdrx apply` reinstalls everything from it.
+### The packages.conf File
+
+```
+# ~/.pdrx/config/packages.conf
+# Format: package_manager:package_name
+#         package_manager:package_name=version (pinned)
+
+apt:vim
+apt:git
+apt:vim=2:9.0.1672-1ubuntu3        ← pinned version
+flatpak:org.gnome.GIMP
+cargo:ripgrep
+cargo:ripgrep=14.1.0                 ← pinned version
+brew:jq
+```
 
 ---
 
-## Syncing to GitHub
+## 🔧 Dotfile Tracking
 
-Push `~/.pdrx` to a private GitHub repo to back up your config and sync it across machines.
+Track your configuration files with automatic symlinking:
 
 ```bash
-# 1. Initialise git inside your pdrx directory
+# Start tracking
+pdrx track ~/.bashrc ~/.vimrc ~/.config/nvim/init.vim ~/.tmux.conf
+
+# Stop tracking
+pdrx untrack ~/.bashrc
+```
+
+How it works:
+1. Copies the file to `~/.pdrx/config/dotfiles/`
+2. Replaces original with a symlink
+3. On `pdrx apply`, symlinks are recreated on new machines
+
+---
+
+## 💾 Backups & Rollback
+
+Create checkpoints before major changes:
+
+```bash
+# Create a backup
+pdrx backup before-upgrade
+
+# List all backups
+pdrx generations
+
+# Rollback to previous state
+pdrx rollback              # Most recent backup
+pdrx rollback 2            # Second most recent
+
+# Restore from specific path
+pdrx restore ~/.pdrx/backups/20250711_120000_manual
+```
+
+---
+
+## 🌐 Supported Package Managers
+
+| Package Manager | Platform | Install Command |
+|-----------------|----------|-----------------|
+| `apt` | Debian, Ubuntu | `pdrx install --pm apt <pkg>` |
+| `dnf` | Fedora, RHEL 8+ | `pdrx install --pm dnf <pkg>` |
+| `yum` | RHEL 7, CentOS | `pdrx install --pm yum <pkg>` |
+| `pacman` | Arch, Manjaro | `pdrx install --pm pacman <pkg>` |
+| `zypper` | openSUSE | `pdrx install --pm zypper <pkg>` |
+| `brew` | macOS, Linux | `pdrx install --pm brew <pkg>` |
+| `flatpak` | Any | `pdrx install --pm flatpak <pkg>` |
+| `snap` | Ubuntu, others | `pdrx install --pm snap <pkg>` |
+| `cargo` | Any (Rust) | `pdrx install --pm cargo <pkg>` |
+| `winget` | Windows | `pdrx install --pm winget <pkg>` |
+
+---
+
+## 🔄 Repository Sources (New in 1.7.0)
+
+Track third-party repositories:
+
+```bash
+# Add a PPA
+pdrx source add apt ppa:deadsnakes/ppa
+
+# Add a repository with GPG key
+pdrx source add apt-repo \
+  'deb [signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu jammy stable' \
+  /etc/apt/keyrings/docker.gpg \
+  https://download.docker.com/linux/ubuntu/gpg
+
+# Add a dnf repo
+pdrx source add dnf https://download.docker.com/linux/fedora/docker-ce.repo
+
+# Add flatpak remote
+pdrx source add flatpak flathub https://flathub.org/repo/flathub.flatpakrepo
+
+# List all sources
+pdrx source list
+```
+
+---
+
+## ⚙️ Systemd Units (New in 1.7.0)
+
+Track enabled systemd units:
+
+```bash
+# Automatically captured during sync
+pdrx sync
+
+# View tracked units
+cat ~/.pdrx/config/systemd.conf
+
+# Format:
+# system:kanata.service     ← system-wide unit
+# user:pipewire.service      ← user unit
+```
+
+---
+
+## 🪝 Post-Apply Hooks (New in 1.7.0)
+
+Run custom automation after `pdrx apply`:
+
+```bash
+# Edit the hook script
+pdrx hook edit
+
+# Example ~/.pdrx/config/hooks/post-apply.sh:
+#!/bin/bash
+# Reload udev rules
+sudo udevadm control --reload-rules
+# Enable GNOME extensions
+gnome-extensions enable user-theme@gnome-shell-extensions.gcampax.github.com
+```
+
+---
+
+## 📊 Audit Log (New in 1.7.0)
+
+View history of all changes:
+
+```bash
+# Show last 30 changes
+pdrx history
+
+# Show last 50 changes
+pdrx history 50
+
+# Log file location
+~/.pdrx/state/pdrx.log
+```
+
+---
+
+## 🖥️ Desktop Environment Export
+
+Export and restore your DE settings:
+
+```bash
+# Export current settings
+pdrx sync-desktop
+
+# Restore settings
+pdrx sync-desktop --restore
+```
+
+**Supported:** GNOME, KDE Plasma, XFCE, i3, Sway, Hyprland
+
+---
+
+## ☁️ Sync to GitHub
+
+Back up your config and sync across machines:
+
+```bash
+# Initialize git
 cd ~/.pdrx
 git init
 
-# 2. Add a .gitignore (backups can be large)
-cat > ~/.pdrx/.gitignore << 'EOF'
+# Create .gitignore
+cat > .gitignore << 'EOF'
 backups/
 *.tar.gz
 EOF
 
-# 3. Create a repo on GitHub (github.com/new), then push
+# Commit and push
 git add config/ state/
 git commit -m "Initial pdrx config"
 git branch -M main
@@ -567,192 +346,160 @@ git push -u origin main
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/my-pdrx-config.git ~/.pdrx
-pdrx init          # marks as initialized if not already
-pdrx apply --parallel
-pdrx sync-desktop --restore
-```
-
-**Daily workflow:**
-
-```bash
-pdrx sync              # capture any new installs/removes
-pdrx sync-desktop      # capture DE setting changes (optional)
-cd ~/.pdrx && git add . && git commit -m "Update config" && git push
-```
-
----
-
-## Multi-Machine & Multi-Profile Setup
-
-Keep multiple machines (or users) in **one repo** by using one directory per profile. Each directory is a complete pdrx home with its own `config/` and `state/`.
-
-```bash
-# Clone the shared repo
-git clone https://github.com/YOUR_USERNAME/my-pdrx-configs.git ~/pdrx-configs
-
-# Create profiles
-mkdir -p ~/pdrx-configs/laptop/config  ~/pdrx-configs/laptop/state
-mkdir -p ~/pdrx-configs/desktop/config ~/pdrx-configs/desktop/state
-mkdir -p ~/pdrx-configs/work/config    ~/pdrx-configs/work/state
-```
-
-Point pdrx at the right profile either per-session or per-command:
-
-```bash
-# Per-session
-export PDRX_HOME=~/pdrx-configs/laptop
 pdrx init
 pdrx apply --parallel
-
-# Per-command
-pdrx -c ~/pdrx-configs/laptop  sync
-pdrx -c ~/pdrx-configs/desktop status
-```
-
-**Shell aliases** remove the need to type `-c` every time:
-
-```bash
-# In ~/.bashrc or ~/.zshrc
-alias pdrx-laptop='pdrx -c ~/pdrx-configs/laptop'
-alias pdrx-desktop='pdrx -c ~/pdrx-configs/desktop'
-alias pdrx-work='pdrx -c ~/pdrx-configs/work'
-```
-
-```bash
-pdrx-laptop sync
-pdrx-desktop apply --parallel
-```
-
-Commit only the profile that changed:
-
-```bash
-cd ~/pdrx-configs
-git add laptop/config laptop/state
-git commit -m "laptop: add new tools"
-git push
-```
-
----
-
-## Workflow: Desktop User
-
-### First-time setup
-
-```bash
-pdrx init
-pdrx sync                                              # capture existing packages
-pdrx source add flatpak flathub https://flathub.org/repo/flathub.flatpakrepo  # add flathub
-pdrx sync-desktop                                      # export DE settings
-pdrx track ~/.bashrc ~/.config/gtk-4.0/settings.ini   # track key dotfiles
-pdrx backup initial
-```
-
-### Day-to-day installs
-
-```bash
-# System utilities
-pdrx install firefox-esr htop neofetch
-
-# Flatpak apps (sandboxed, newer versions)
-pdrx install --pm flatpak org.gnome.GIMP org.telegram.desktop org.libreoffice.LibreOffice
-
-# Snap (if you use it)
-pdrx install --pm snap code
-```
-
-### Before and after major changes
-
-```bash
-pdrx backup before-upgrade
-sudo apt full-upgrade         # or whatever your distro's upgrade is
-pdrx sync
-pdrx backup after-upgrade
-```
-
-### Moving to a new machine
-
-```bash
-# On old machine
-cd ~/.pdrx && git push
-# (or: pdrx export ~/my-config.tar.gz)
-
-# On new machine — install your package managers first, then:
-git clone https://github.com/YOU/my-pdrx-config.git ~/.pdrx
-pdrx init
-pdrx apply --parallel    # sources are applied FIRST, then packages
 pdrx sync-desktop --restore
 ```
 
 ---
 
-## Workflow: Developer
+## 🏷️ Self-Update
 
-### First-time setup
+Update pdrx to the latest version:
 
 ```bash
-pdrx init
-pdrx install --pm apt build-essential git curl wget    # base dev stack
-pdrx install --pm cargo ripgrep fd-find bat --pin      # Rust CLI tools, pinned
-pdrx install --pm brew jq yq-go                        # tools not in apt
-pdrx track ~/.bashrc ~/.vimrc ~/.config/nvim/init.vim ~/.tmux.conf ~/.gitconfig
-pdrx sync-desktop
-pdrx backup dev-setup
+pdrx self-update
 ```
 
-### Language-specific tooling
+Uses SHA256 verification for security.
+
+---
+
+## 📖 Complete Command Reference
+
+### Global Flags
+
+| Flag | Description |
+|------|-------------|
+| `-h, --help` | Show help |
+| `-v, --version` | Show version |
+| `-q, --quiet` | Suppress output |
+| `-d, --debug` | Verbose debug output |
+| `-y, --yes` | Skip confirmations |
+| `-n, --dry-run` | Preview changes only |
+| `-c DIR` | Use alternate config directory |
+
+### All Commands
 
 ```bash
-# Rust (global dev tools)
-pdrx install --pm cargo rustfmt clippy cargo-watch
+# Package management
+pdrx install <pkg> [pkg...]              # Install packages
+pdrx install --pm <pm> <pkg>             # Use specific package manager
+pdrx install --pm <pm> <pkg> --pin       # Pin current version
+pdrx install --pm <pm> <pkg> --pin=X.Y.Z # Pin specific version
+pdrx remove <pkg> [pkg...]               # Remove packages
+pdrx list                                # List all tracked packages
+pdrx search <query>                      # Search all package managers
+pdrx search <query> --parallel           # Parallel search
+pdrx sync                                # Capture installed packages
+pdrx apply                               # Restore from config
+pdrx apply --parallel                    # Parallel restore
+pdrx update                              # Refresh package indexes
+pdrx upgrade                             # Upgrade all packages
 
-# Python
-pdrx install --pm apt python3-pip python3-venv
+# Sources
+pdrx source add <pm> <source>              # Add repository source
+pdrx source list                         # List all sources
+pdrx source apply                        # Re-apply all sources
 
-# Node
-pdrx install --pm brew node
-```
+# Dotfiles
+pdrx track <path> [path...]              # Track dotfiles
+pdrx untrack <path> [path...]            # Stop tracking
 
-### Syncing across workstation and laptop
+# Desktop
+pdrx sync-desktop                        # Export DE settings
+pdrx sync-desktop --restore              # Restore DE settings
 
-```bash
-# After changes on workstation
-pdrx sync
-cd ~/.pdrx && git add . && git commit -m "Add new tools" && git push
+# Backups
+pdrx backup [label]                      # Create backup
+pdrx generations                         # List backups
+pdrx rollback [N]                        # Rollback (N=generations back)
+pdrx restore <path>                      # Restore from path
+pdrx clean [all|current|N-N]             # Remove backups
 
-# On laptop
-cd ~/.pdrx && git pull
-pdrx apply --parallel
-pdrx sync-desktop --restore
-```
+# Hooks
+pdrx hook edit                           # Edit post-apply hook
 
-### Fresh machine setup
+# Audit
+pdrx history [N]                         # Show audit log
 
-> Install your package managers first (brew, flatpak, cargo, etc.), then:
-
-```bash
-git clone https://github.com/YOU/my-pdrx-config.git ~/.pdrx
-pdrx init
-pdrx apply --parallel    # sources → packages → dotfiles → DE → systemd → hooks
-pdrx sync-desktop --restore
-# Dotfiles are deployed, packages installed via their exact original PMs
-```
-
-### Rollback after a bad change
-
-```bash
-pdrx generations           # list all checkpoints
-pdrx rollback 2            # restore from 2nd most recent backup
-pdrx apply --parallel      # reinstall from the restored config
+# Config
+pdrx init                                # Initialize pdrx
+pdrx status                              # Show setup overview
+pdrx export <file.tar.gz>                # Export config
+pdrx import <file.tar.gz>                # Import config
+pdrx self-update                         # Update pdrx
+pdrx destroy                             # Remove pdrx completely
 ```
 
 ---
 
-## License
+## 🛡️ Version Pinning
 
-[MIT](LICENSE)
+Lock specific versions for reproducibility:
+
+```bash
+# Auto-pin current version
+pdrx install --pm apt vim --pin
+
+# Pin specific version
+pdrx install --pm apt vim --pin=2:9.0.1672-1
+
+# Results in packages.conf:
+# apt:vim=2:9.0.1672-1
+```
+
+**Note:** Pinning is opt-in. Default behavior installs latest versions.
 
 ---
 
-<p align="center">
-  <sub>Started as dotfiles → stow → chezmoi → a Nix wrapper (painful) → pure Bash with shellcheck. No external dependencies. Enjoy.</sub>
-</p>
+## 🚫 Scope & Limitations
+
+pdrx handles:
+- ✅ Packages (apt, dnf, flatpak, cargo, etc.)
+- ✅ Repository/PPA sources
+- ✅ Dotfiles and config files
+- ✅ Desktop environment settings
+- ✅ Enabled systemd units
+- ✅ Post-apply hooks
+
+pdrx does **not** handle:
+- ❌ Disk partitioning
+- ❌ Filesystem/fstab configuration
+- ❌ LUKS encryption
+- ❌ User/group management
+- ❌ Low-level system provisioning
+
+These remain in your provisioning layer (Ansible, Terraform, or manual setup).
+
+---
+
+## 🧪 Testing
+
+```bash
+# Run test suite
+cd /path/to/pdrx
+./test_suite.sh
+
+# Test in containers
+make test-debian
+make test-fedora
+make test-arch
+make test-all
+```
+
+---
+
+## 📄 License
+
+MIT License — see [LICENSE](LICENSE)
+
+---
+
+<div align="center">
+
+**Started as dotfiles → stow → chezmoi → a Nix wrapper (painful) → pure Bash.**
+
+Enjoy.
+
+</div>
