@@ -7,7 +7,7 @@
 **Portable Dynamic Reproducible gnu/linuX**
 
 <p>
-  <a href="https://github.com/stefan-hacks/pdrx/releases"><img src="https://img.shields.io/badge/version-1.7.1-58a6ff?style=flat-square" alt="version" /></a>
+  <a href="https://github.com/stefan-hacks/pdrx/releases"><img src="https://img.shields.io/badge/version-1.7.2-58a6ff?style=flat-square" alt="version" /></a>
   <a href="#"><img src="https://img.shields.io/badge/shell-bash-2ea043?style=flat-square" alt="bash" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8b949e?style=flat-square" alt="license" /></a>
 </p>
@@ -88,7 +88,7 @@ source ~/.bashrc
 ### Verify Installation
 
 ```bash
-pdrx --version    # Should show 1.7.1
+pdrx --version    # Should show 1.7.2
 pdrx init         # Creates ~/.pdrx/
 ```
 
@@ -171,8 +171,23 @@ brew:jq
 
 Track your configuration files with automatic symlinking:
 
+### Auto-Discover Common Dotfiles (New in 1.7.2)
+
 ```bash
-# Start tracking
+# Automatically find and track common dotfiles
+pdrx sync-dotfiles
+```
+
+This discovers and tracks configs for:
+- **Shells:** Bash, Zsh, Fish, Nushell
+- **Editors:** Vim, Neovim, Helix, Emacs, VS Code
+- **Terminals:** Kitty, Alacritty, WezTerm
+- **Tools:** Tmux, Git, SSH, Starship, Direnv, GPG
+
+### Manual Tracking
+
+```bash
+# Start tracking specific files
 pdrx track ~/.bashrc ~/.vimrc ~/.config/nvim/init.vim ~/.tmux.conf
 
 # Stop tracking
