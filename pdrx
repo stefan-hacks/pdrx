@@ -16,7 +16,7 @@
 
 set -euo pipefail
 
-VERSION="1.7.0"
+VERSION="1.7.1"
 
 # =============================================================================
 # PORTABLE HELPERS
@@ -961,7 +961,11 @@ export_desktop_state() {
       _cp_dir "$HOME/.config/gnome-shell" "$out/"
       _cp_dir "$HOME/.config/gtk-3.0"     "$out/"
       _cp_dir "$HOME/.config/gtk-4.0"     "$out/"
-      _cp_dir "$HOME/.local/share/gnome-shell/extensions" "$out/gnome-shell-extensions"
+      # Fix: copy contents of extensions dir, not the dir itself
+      if [ -d "$HOME/.local/share/gnome-shell/extensions" ]; then
+        mkdir -p "$out/gnome-shell-extensions"
+        cp -R "$HOME/.local/share/gnome-shell/extensions/"* "$out/gnome-shell-extensions/" 2>/dev/null || true
+      fi
       ;;
     kde)
       mkdir -p "$out/.config" "$out/.local"
@@ -1031,10 +1035,10 @@ restore_desktop_state() {
       _cp_dir "$out/gnome-shell" "$HOME/.config/"
       _cp_dir "$out/gtk-3.0"     "$HOME/.config/"
       _cp_dir "$out/gtk-4.0"     "$HOME/.config/"
+      # Fix: copy contents, not the dir itself
       if [ -d "$out/gnome-shell-extensions" ]; then
-        mkdir -p "$HOME/.local/share/gnome-shell"
-        cp -R "$out/gnome-shell-extensions" \
-          "$HOME/.local/share/gnome-shell/extensions" 2>/dev/null || true
+        mkdir -p "$HOME/.local/share/gnome-shell/extensions"
+        cp -R "$out/gnome-shell-extensions/"* "$HOME/.local/share/gnome-shell/extensions/" 2>/dev/null || true
       fi
       ;;
     kde)
