@@ -696,7 +696,11 @@ run_source() {
       ;;
     list)
       log_header "Declared sources"
-      [ -s "$SOURCES_CONF" ] && cat "$SOURCES_CONF" || log_info "No sources declared."
+      if [ -s "$SOURCES_CONF" ]; then
+        cat "$SOURCES_CONF"
+      else
+        log_info "No sources declared."
+      fi
       ;;
     apply)
       _apply_sources
@@ -723,8 +727,8 @@ _apply_sources() {
       apt:ppa)
         if [ "${DRY_RUN:-false}" = "true" ]; then
           log_info "[dry-run] would ensure apt ppa: $val"
-        else
-          pm_available apt && sudo add-apt-repository -y "$val" 2>/dev/null || true
+        elif pm_available apt; then
+          sudo add-apt-repository -y "$val" 2>/dev/null || true
         fi
         ;;
       apt:repo)
@@ -734,7 +738,8 @@ _apply_sources() {
           log_info "[dry-run] would ensure apt repo: $repo_line"
         elif pm_available apt; then
           [ -f "$keyring" ] || { sudo mkdir -p "$(dirname "$keyring")"; curl -fsSL "$key_url" | sudo gpg --dearmor -o "$keyring" 2>/dev/null || true; }
-          local list_name="pdrx-$(echo "$repo_line" | md5sum | cut -c1-8).list"
+          local list_name
+          list_name="pdrx-$(echo "$repo_line" | md5sum | cut -c1-8).list"
           [ -f "/etc/apt/sources.list.d/$list_name" ] \
             || echo "$repo_line" | sudo tee "/etc/apt/sources.list.d/$list_name" >/dev/null
         fi

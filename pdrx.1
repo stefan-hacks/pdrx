@@ -1,7 +1,7 @@
 .\" pdrx.1 - man page for pdrx
 .\" Portable Dynamic Reproducible gnu/linuX - reproducible Linux system setup
 .\" Use: groff -man -Tutf8 pdrx.1 | less
-.TH PDRX 1 "2025\-02\-15" "pdrx 1.6.0" "User Commands"
+.TH PDRX 1 "2025\-07\-11" "pdrx 1.7.0" "User Commands"
 .SH NAME
 pdrx \- Portable Dynamic Reproducible gnu/linuX: reproducible Linux system setup with declarative package config
 .SH SYNOPSIS
@@ -22,15 +22,23 @@ pdrx \- Portable Dynamic Reproducible gnu/linuX: reproducible Linux system setup
 .PP
 You install and remove packages imperatively (e.g. \fBpdrx install vim\fR). pdrx records each package together with the \fIpackage manager\fR used (apt, flatpak, cargo, etc.) in a declarative config file. When you run \fBpdrx apply\fR on another machine, it installs the same packages via the same package managers, giving you a reproducible environment.
 .PP
-Supported package managers: \fBapt\fR, \fBdnf\fR, \fByum\fR, \fBpacman\fR, \fBzypper\fR, \fBbrew\fR, \fBflatpak\fR, \fBsnap\fR, and \fBcargo\fR. pdrx auto-detects which of these are available on the system.
+Supported package managers: \fBapt\fR, \fBdnf\fR, \fByum\fR, \fBpacman\fR, \fBzypper\fR, \fBbrew\fR, \fBflatpak\fR, \fBsnap\fR, \fBcargo\fR, and \fBwinget\fR. pdrx auto-detects which of these are available on the system.
 .PP
 Additional features:
+.IP \(bu 2
+Repository/PPA/third-party source tracking (apt PPA, dnf repo, flatpak remote).
+.IP \(bu 2
+Systemd unit enablement tracking (system and user units).
 .IP \(bu 2
 Desktop environment export/restore (GNOME, KDE, XFCE, i3, Sway, Hyprland).
 .IP \(bu 2
 Dotfile tracking (e.g. \fI~/.bashrc\fR, \fI~/.config/nvim/init.vim\fR).
 .IP \(bu 2
 Timestamped backups (generations) and rollback.
+.IP \(bu 2
+Audit logging of all state-changing actions.
+.IP \(bu 2
+Post-apply hook support for custom automation.
 .IP \(bu 2
 Export/import of config as a tarball for sharing or migration.
 .SH OPTIONS
@@ -52,7 +60,7 @@ Enable verbose/debug output.
 Answer yes to all confirmation prompts (e.g. restore, destroy, clean). Use with care.
 .TP
 \fB\-n\fR, \fB\-\-dry\-run\fR
-Show what would be done without making changes. Supported for \fBapply\fR, \fBrestore\fR, and similar.
+Show what would be done without making changes. Supported for \fBapply\fR, \fBrestore\fR, \fBsource\fR, and similar.
 .TP
 \fB\-c\fR \fIDIR\fR, \fB\-\-config\fR \fIDIR\fR
 Use \fIDIR\fR as the pdrx home (config, backups, state). Default is \fI$HOME/.pdrx\fR.
@@ -60,7 +68,7 @@ Use \fIDIR\fR as the pdrx home (config, backups, state). Default is \fI$HOME/.pd
 \fB\-\-install\fR
 Install the pdrx script to \fI~/.local/bin/pdrx\fR and add that directory to PATH in \fI~/.bashrc\fR and \fI~/.zshrc\fR if missing. Then run \fBpdrx init\fR to initialize.
 .SH COMMANDS
-Most commands require pdrx to be initialized (\fBpdrx init\fR). \fBsearch\fR and \fB\-\-help\fR/\fB\-\-version\fR/\fB\-\-install\fR do not.
+Most commands require pdrx to be initialized (\fBpdrx init\fR). \fBsearch\fR, \fBsource\fR, and \fB\-\-help\fR/\fB\-\-version\fR/\fB\-\-install\fR do not.
 .SS init
 Initialize pdrx. Creates the config directory structure under \fBPDRX_HOME\fR (default \fI~/.pdrx\fR), the declarative packages file, and state files. Also exports the current desktop state if supported.
 .PP
@@ -68,7 +76,7 @@ Initialize pdrx. Creates the config directory structure under \fBPDRX_HOME\fR (d
 .B pdrx init
 .RE
 .SS status
-Show current status: config path, backups path, OS and desktop IDs, detected package managers, number of packages in the declarative config, and number of backups.
+Show current status: config path, backups path, OS and desktop IDs, detected package managers, number of packages/sources/systemd units in the declarative config, hook presence, and number of backups.
 .PP
 .RS
 .B pdrx status
@@ -76,10 +84,10 @@ Show current status: config path, backups path, OS and desktop IDs, detected pac
 .SS install
 Install one or more packages and record them in the declarative config. If multiple package managers are available, pdrx prompts you to choose one per package (or use \fB\-\-pm\fR to force a PM). The chosen PM is stored so that \fBpdrx apply\fR uses the same PM on another machine.
 .TP
-\fBpdrx install\fR \fIpkg\fR [\fIpkg\fR...]
-Install \fIpkg\fR(s); choose PM interactively if there is more than one.
+\fBpdrx install\fR [\fB\-\-pin\fR[=\fIVERSION\fR]] \fIpkg\fR [\fIpkg\fR...]
+Install \fIpkg\fR(s); choose PM interactively if there is more than one. Use \fB\-\-pin\fR to record the installed version, or \fB\-\-pin=VERSION\fR to install a specific version.
 .TP
-\fBpdrx install \-\-pm\fR \fIPM\fR \fIpkg\fR [\fIpkg\fR...]
+\fBpdrx install \-\-pm\fR \fIPM\fR [\fB\-\-pin\fR[=\fIVERSION\fR]] \fIpkg\fR [\fIpkg\fR...]
 Install using the given package manager only. \fIPM\fR must be one of: apt, dnf, yum, pacman, zypper, brew, flatpak, snap, cargo.
 .PP
 .RS
@@ -87,7 +95,9 @@ Install using the given package manager only. \fIPM\fR must be one of: apt, dnf,
 .br
 .B pdrx install \-\-pm flatpak org.gnome.GIMP
 .br
-.B pdrx install \-\-pm cargo ripgrep bat
+.B pdrx install \-\-pm cargo ripgrep \-\-pin
+.br
+.B pdrx install \-\-pm apt vim \-\-pin=2:9.0.1672-1ubuntu3
 .RE
 .SS remove
 Remove one or more packages and update the declarative config. pdrx looks up the package manager that was used when the package was added and uses that same PM to uninstall. If the package is not in the config, it is searched for across all available PMs and removed if found.
@@ -98,7 +108,7 @@ Remove one or more packages and update the declarative config. pdrx looks up the
 .B pdrx remove package1 package2
 .RE
 .SS list
-List all packages in the declarative config (one per line in \fIpm:package\fR form).
+List all packages in the declarative config (one per line in \fIpm:package\fR or \fIpm:package=version\fR form).
 .PP
 .RS
 .B pdrx list
@@ -114,6 +124,9 @@ Search only in the PM(s) with the given index numbers (e.g. \fB1 4\fR for first 
 .TP
 \fBpdrx search \-\-pm\fR \fIPM\fR \fITERM\fR
 Search only in the given package manager \fIPM\fR.
+.TP
+\fBpdrx search \-\-parallel\fR \fITERM\fR
+Search all PMs simultaneously (faster but output may be interleaved).
 .PP
 .RS
 .B pdrx search ripgrep
@@ -121,21 +134,64 @@ Search only in the given package manager \fIPM\fR.
 .B pdrx search vim 1 4
 .br
 .B pdrx search \-\-pm apt vim
+.br
+.B pdrx search \-\-parallel ripgrep
+.RE
+.SS source
+Manage repository/PPA/third-party sources (new in 1.7.0). This allows \fBpdrx apply\fR to reproduce systems that depend on packages outside default distro repos (e.g., docker-ce, PPAs, Flathub).
+.TP
+\fBpdrx source add apt\fR \fIPPA\fR
+Add an apt PPA (e.g., \fBppa:deadsnakes/ppa\fR). Requires \fBadd-apt-repository\fR.
+.TP
+\fBpdrx source add apt-repo\fR \fI'DEB_LINE'\fR \fIKEYRING_PATH\fR \fIKEY_URL\fR
+Add a raw apt repository with GPG key. Downloads the key from \fIKEY_URL\fR to \fIKEYRING_PATH\fR and creates a sources.list.d entry.
+.TP
+\fBpdrx source add dnf\fR \fIREPO_URL\fR
+Add a dnf repository (URL to .repo file).
+.TP
+\fBpdrx source add zypper\fR \fIREPO_URL\fR
+Add a zypper repository (URL to .repo file).
+.TP
+\fBpdrx source add flatpak\fR \fINAME\fR \fIREPO_URL\fR
+Add a flatpak remote (e.g., \fBflathub https://flathub.org/repo/flathub.flatpakrepo\fR).
+.TP
+\fBpdrx source list\fR
+List all declared sources from \fI~/.pdrx/config/sources.conf\fR.
+.TP
+\fBpdrx source apply\fR
+Re-apply all declared sources. This runs automatically at the start of \fBpdrx apply\fR.
+.PP
+.RS
+.B pdrx source add apt ppa:deadsnakes/ppa
+.br
+.B pdrx source add apt-repo 'deb [signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu jammy stable' /etc/apt/keyrings/docker.gpg https://download.docker.com/linux/ubuntu/gpg
+.br
+.B pdrx source add dnf https://download.docker.com/linux/fedora/docker-ce.repo
+.br
+.B pdrx source add flatpak flathub https://flathub.org/repo/flathub.flatpakrepo
 .RE
 .SS sync
-Capture the current system state into the declarative config. Scans all detected package managers for installed packages, merges with any existing \fIpackages.conf\fR entries, and overwrites \fIpackages.conf\fR with the combined set (each line: \fIpackage_manager:package_name\fR). Also exports the current desktop state. Use after manual installs/removals to bring the declarative config in line with the system.
+Capture the current system state into the declarative config. Scans all detected package managers for installed packages, enabled systemd units, and merges with existing config. Also exports the current desktop state. Use after manual installs/removals to bring the declarative config in line with the system.
 .PP
 .RS
 .B pdrx sync
 .RE
 .SS apply
-Apply the declarative config: install every package listed in \fIpackages.conf\fR using its \fIrecorded\fR package manager. Skips packages already installed. Deploys tracked dotfiles and can restore desktop state. This is the main command for reproducing a setup on a new machine.
+Apply the declarative config: sources first, then packages, dotfiles, desktop state, systemd units, and finally the post-apply hook. This is the main command for reproducing a setup on a new machine.
+.TP
+\fBpdrx apply\fR
+Apply sequentially (safer, clearer output).
+.TP
+\fBpdrx apply \-\-parallel\fR
+Apply packages across different PMs in parallel (faster but interleaved output).
 .PP
 .RS
 .B pdrx apply
 .br
 .B pdrx \-n apply
-(in dry-run mode)
+(dry-run mode)
+.br
+.B pdrx apply \-\-parallel
 .RE
 .SS track
 Track a dotfile: copy it into the pdrx config and optionally symlink it back so edits go to the tracked copy. \fIFILE\fR can be an absolute path or a path relative to \fI$HOME\fR.
@@ -151,8 +207,17 @@ Stop tracking a dotfile and remove its copy from the config. Does not remove the
 .RS
 .B pdrx untrack ~/.bashrc
 .RE
+.SS hook
+Manage the post-apply hook script (new in 1.7.0).
+.TP
+\fBpdrx hook edit\fR
+Create or open the post-apply hook at \fI~/.pdrx/config/hooks/post-apply.sh\fR. This script, if present and executable, runs at the end of \fBpdrx apply\fR. Use it for custom automation that cannot be expressed declaratively (e.g., reloading udev rules, enabling GNOME extensions).
+.PP
+.RS
+.B pdrx hook edit
+.RE
 .SS backup
-Create a timestamped backup (generation) of the current config, desktop export, dotfiles, and tracked-dotfiles list. Optional \fILABEL\fR is appended to the directory name (e.g. \fI20250215_120000_manual\fR or \fI20250215_120000_before-upgrade\fR).
+Create a timestamped backup (generation) of the current config, sources, systemd units, desktop export, dotfiles, hooks, and tracked-dotfiles list. Optional \fILABEL\fR is appended to the directory name (e.g. \fI20250711_120000_manual\fR or \fI20250711_120000_before-upgrade\fR).
 .PP
 .RS
 .B pdrx backup
@@ -163,7 +228,7 @@ Create a timestamped backup (generation) of the current config, desktop export, 
 Restore the pdrx config from a backup directory. \fIPATH\fR must be the full path to a backup directory (e.g. under \fI~/.pdrx/backups/\fR). Prompts for confirmation unless \fB\-y\fR is used.
 .PP
 .RS
-.B pdrx restore ~/.pdrx/backups/20250215_120000_manual
+.B pdrx restore ~/.pdrx/backups/20250711_120000_manual
 .RE
 .SS generations
 List all backup generations (oldest to newest) with reference numbers 1, 2, ... and the path to each backup directory. The last line indicates \fBcurrent\fR (the active config, not a backup). These numbers are used by \fBclean\fR and \fBrollback\fR.
@@ -204,194 +269,126 @@ Restore from the N-th most recent backup (N defaults to 1). \fBrollback 1\fR res
 .br
 .B pdrx rollback 2
 .RE
+.SS history
+Show the last N entries from the audit log (new in 1.7.0). The audit log records every state-changing action (install, remove, source add, apply, etc.) with timestamps. Defaults to 30 entries.
+.PP
+.RS
+.B pdrx history
+.br
+.B pdrx history 50
+.RE
 .SS sync-desktop
-Export the current desktop/DE state (GNOME, KDE, XFCE, i3, Sway, Hyprland, etc.) into the pdrx config. Used automatically by \fBsync\fR.
+Export the current desktop environment settings (GNOME, KDE, XFCE, i3, Sway, Hyprland) to \fI~/.pdrx/config/desktop-export/\fR. Also backs up common settings (mimeapps, user-dirs, fontconfig, etc.).
 .PP
 .RS
 .B pdrx sync-desktop
 .RE
-.SS sync-desktop \-\-restore
-Restore the previously exported desktop state. Used automatically by \fBapply\fR.
+.SS sync-desktop --restore
+Restore desktop environment settings from the export in \fI~/.pdrx/config/desktop-export/\fR. Use with care on a different DE than was exported.
 .PP
 .RS
 .B pdrx sync-desktop \-\-restore
 .RE
 .SS update
-Update all detected package manager indexes/caches (e.g. \fBapt-get update\fR, \fBpacman -Sy\fR). Does not upgrade installed packages.
+Refresh package manager indexes for all detected PMs. Runs \fBapt-get update\fR, \fBdnf check-update\fR, \fBflatpak update --appstream\fR, etc. Does not upgrade packages.
 .PP
 .RS
 .B pdrx update
 .RE
 .SS upgrade
-Upgrade all installed packages using each detected package manager (e.g. \fBapt-get upgrade\fR, \fBdnf upgrade\fR, \fBpacman -Su\fR, \fBbrew upgrade\fR, \fBflatpak update\fR, \fBsnap refresh\fR). For \fBcargo\fR, requires the \fIcargo-update\fR crate (\fBcargo install cargo-update\fR); if not installed, a warning is shown and cargo is skipped.
+Upgrade all installed packages via each detected package manager. For cargo, may auto-install \fBcargo-update\fR if not present.
 .PP
 .RS
 .B pdrx upgrade
 .RE
+.SS self-update
+Update pdrx itself to the latest release (new in 1.7.0). Downloads from GitHub releases with SHA256 checksum verification. Hard-stops if the checksum is missing or does not match.
+.PP
+.RS
+.B pdrx self-update
+.RE
 .SS export
-Export the pdrx config (and state) as a gzipped tarball. If \fIFILE\fR is given, the tarball is written to \fIFILE\fR; otherwise it is written to stdout.
+Export the entire pdrx config (packages, sources, systemd units, dotfiles, desktop export, state) as a gzipped tarball. If \fIFILE\fR is omitted, writes to stdout.
 .PP
 .RS
 .B pdrx export my-config.tar.gz
 .br
-.B pdrx export > backup.tar.gz
+.B pdrx export \> my-config.tar.gz
 .RE
 .SS import
-Import a config tarball (created with \fBpdrx export\fR) into the current pdrx home. Extracts into \fBPDRX_HOME\fR (config/state). Overwrites existing config; use with care.
+Import a pdrx config from a tarball created by \fBexport\fR. Extracts into \fBPDRX_HOME\fR.
 .PP
 .RS
 .B pdrx import my-config.tar.gz
 .RE
 .SS destroy
-Return the system to the way it was before using pdrx. All configs and rc files are put back safely: for each tracked dotfile that is currently a symlink, the symlink is removed and replaced with a real file (content copied from the pdrx config), so files like \fI~/.bashrc\fR and \fI~/.config/nvim/init.vim\fR are restored to their correct locations with no symlinks left. Then the pdrx home directory (config, backups, state) is deleted, the \fI~/.local/bin/pdrx\fR binary is removed, and the PATH line added to \fI~/.bashrc\fR and \fI~/.zshrc\fR is removed. \fBDoes not\fR uninstall packages that were installed with pdrx. Prompts for confirmation unless \fB\-y\fR.
+Remove pdrx completely. Restores tracked dotfiles (replaces symlinks with the real files), removes \fBPDRX_HOME\fR, and removes the pdrx binary from \fI~/.local/bin\fR. Confirmation required (type \fByes\fR) unless \fB\-y\fR.
 .PP
 .RS
 .B pdrx destroy
 .br
 .B pdrx \-y destroy
 .RE
-.SH DECLARATIVE FORMAT
-The file \fIpackages.conf\fR (under \fBPDRX_HOME/config\fR) is the declarative package list. Each non-empty, non-comment line has the form:
-.PP
-.RS
-\fIpackage_manager\fR\fB:\fR\fIpackage_name\fR
-.RE
-.PP
-Examples:
+.SH CONFIG LAYOUT
+The pdrx home directory (\fBPDRX_HOME\fR, default \fI~/.pdrx\fR) contains:
 .PP
 .RS
 .nf
-apt:vim
-apt:git
-flatpak:org.gnome.GIMP
-cargo:ripgrep
+~/.pdrx/
+├── config/
+│   ├── packages.conf          # Declarative packages (pm:package or pm:package=version)
+│   ├── sources.conf           # Repository/PPA sources (new in 1.7.0)
+│   ├── systemd.conf           # Enabled systemd units (new in 1.7.0)
+│   ├── dotfiles/              # Tracked dotfile copies
+│   ├── desktop-export/        # Exported DE settings
+│   └── hooks/                 # Post-apply hook scripts
+├── backups/
+│   └── 20250711_120000_label/ # Timestamped backups
+└── state/
+    ├── initialized            # Initialization marker
+    ├── version                # pdrx version
+    ├── os-id                  # Detected OS
+    ├── tracked-dotfiles       # List of tracked relative paths
+    ├── generations            # Backup timestamps
+    └── pdrx.log               # Audit log (JSON-lines, new in 1.7.0)
 .fi
 .RE
+.SH SCOPE
+.B pdrx
+deliberately stays above the OS provisioning layer. It handles:
+.IP \(bu 2
+Packages and their versions
+.IP \(bu 2
+Repository/PPA/third-party sources
+.IP \(bu 2
+Dotfiles
+.IP \(bu 2
+Desktop environment settings
+.IP \(bu 2
+Enabled systemd units
 .PP
-Adding a package with \fBpdrx install\fR (or \fBinstall \-\-pm\fR) appends the corresponding line. \fBpdrx remove\fR removes the line. \fBpdrx apply\fR reads each line and runs the appropriate PM to install the package. Storing the PM per package ensures the same source and versioning behavior when restoring on another machine.
-.SH FILES
-.TP
-\fI$HOME/.pdrx\fR (or \fBPDRX_HOME\fR)
-Top-level pdrx directory.
-.TP
-\fI$PDRX_HOME/config/packages.conf\fR
-Declarative package list (one \fIpm:package\fR per line).
-.TP
-\fI$PDRX_HOME/config/dotfiles/\fR
-Tracked dotfiles (copies).
-.TP
-\fI$PDRX_HOME/config/desktop-export/\fR
-Exported desktop/DE state.
-.TP
-\fI$PDRX_HOME/backups/\fR
-Timestamped backup directories (generations).
-.TP
-\fI$PDRX_HOME/state/\fR
-State files (e.g. initialized, version, tracked-dotfiles list).
+It explicitly does NOT handle: partitioning, fstab, LUKS, user/group management, kernel parameters, or udev rules (beyond what the hook mechanism can trigger). For those, use cloud-init, Ansible, or Nix.
 .SH ENVIRONMENT
 .TP
 \fBPDRX_HOME\fR
-Override the pdrx home directory (default: \fI$HOME/.pdrx\fR). Can also be set via \fB\-c\fR \fIDIR\fR.
+Path to the pdrx home directory. Default: \fI$HOME/.pdrx\fR. Can be overridden with \fB\-c DIR\fR.
 .SH EXIT STATUS
 .TP
-0
+\fB0\fR
 Success.
 .TP
-1
-Error (invalid usage, missing config, or command failure).
-.SH VERSION
-1.4.8
-.SH HOMEPAGE
-https://github.com/stefan-hacks/pdrx
-.PP
-Please report bugs and feature requests to the issue tracker. Please do your best to provide a reproducible test case for bugs. This should include the steps to reproduce, the pdrx command, the actual output and the expected output. Please also include the output of running the same pdrx command with the \fB\-d\fR (\fB\-\-debug\fR) flag.
-.PP
-If you have questions that don't obviously fall into the "bug" or "feature request" category, then they are welcome in the Discussions section of the repository: https://github.com/stefan-hacks/pdrx/discussions.
-.SH EXAMPLES
-.PP
-First-time setup and capture current system:
-.PP
-.RS
-.nf
-\fBpdrx init\fR
-\fBpdrx sync\fR
-\fBpdrx backup initial\fR
-.fi
-.RE
-.PP
-Install packages (interactive PM choice or forced PM):
-.PP
-.RS
-.nf
-\fBpdrx install vim git htop\fR
-\fBpdrx install \-\-pm flatpak org.gnome.GIMP\fR
-\fBpdrx install \-\-pm cargo ripgrep bat\fR
-.fi
-.RE
-.PP
-Search in all PMs (press Enter when prompted) or only in apt and snap:
-.PP
-.RS
-.nf
-\fBpdrx search ripgrep\fR
-\fBpdrx search vim 1 4\fR
-.fi
-.RE
-.PP
-Before/after a big change:
-.PP
-.RS
-.nf
-\fBpdrx backup before-upgrade\fR
-\fB# ... do upgrade ...\fR
-\fBpdrx sync\fR
-\fBpdrx backup after-upgrade\fR
-.fi
-.RE
-.PP
-List and clean old backups (remove refs 2 through 4):
-.PP
-.RS
-.nf
-\fBpdrx generations\fR
-\fBpdrx clean 2\-4\fR
-.fi
-.RE
-.PP
-Restore from the most recent backup:
-.PP
-.RS
-\fBpdrx rollback 1\fR
-.RE
-.PP
-Upgrade all packages (refresh indexes first, then upgrade):
-.PP
-.RS
-.nf
-\fBpdrx update\fR
-\fBpdrx upgrade\fR
-.fi
-.RE
-.PP
-Reproduce setup on a new machine:
-.PP
-.RS
-.nf
-\fBpdrx init\fR
-\fBpdrx import my-config.tar.gz\fR
-\fBpdrx apply\fR
-\fBpdrx sync-desktop \-\-restore\fR
-.fi
-.RE
-.PP
-Revert to pre\-pdrx state (restore dotfiles to real files, remove symlinks, remove pdrx):
-.PP
-.RS
-\fBpdrx destroy\fR
-.RE
+\fB1\fR
+General error (command failed, validation error, network error, etc.).
 .SH SEE ALSO
-\fBapt\fR(8), \fBdnf\fR(8), \fBpacman\fR(8), \fBflatpak\fR(1), \fBsnap\fR(8), \fBcargo\fR(1), \fBbrew\fR(1)
-.PP
-Project and full documentation: see the \fIREADME.md\fR in the pdrx source tree.
-.SH AUTHORS
-stefan-hacks <stefanmrobertson@gmail.com>
+.BR apt (8),
+.BR dnf (8),
+.BR pacman (8),
+.BR zypper (8),
+.BR flatpak (1),
+.BR snap (1),
+.BR cargo (1),
+.BR systemctl (1)
+.SH AUTHOR
+Stefan-Hacks \fIhttps://github.com/stefan-hacks/pdrx\fR
+.SH LICENSE
+MIT License.

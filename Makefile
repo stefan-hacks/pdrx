@@ -55,6 +55,27 @@ test:
 	 PDRX_HOME="$$TMPDIR" bash $(SCRIPT) -y clean all; \
 	 echo "All tests passed."
 
+test-full:
+	@bash test_suite.sh
+
+test-debian:
+	@echo "=== Testing in Debian container ==="
+	@docker run --rm -v "$(PWD):/pdrx" -w /pdrx debian:12-slim bash -c \
+	 "apt-get update && apt-get install -y shellcheck bash && bash test_suite.sh"
+
+test-fedora:
+	@echo "=== Testing in Fedora container ==="
+	@docker run --rm -v "$(PWD):/pdrx" -w /pdrx fedora:latest bash -c \
+	 "dnf install -y shellcheck bash && bash test_suite.sh"
+
+test-arch:
+	@echo "=== Testing in Arch container ==="
+	@docker run --rm -v "$(PWD):/pdrx" -w /pdrx archlinux:latest bash -c \
+	 "pacman -Sy --noconfirm shellcheck bash && bash test_suite.sh"
+
+test-all: test-debian test-fedora test-arch
+	@echo "=== All cross-distro tests completed ==="
+
 # ── Homebrew formula maintenance ──────────────────────────────────────────────
 
 # Print the sha256 you need to paste into Formula/pdrx.rb for a given tag.
