@@ -6,11 +6,17 @@
 # Imperative install/remove with automatic declarative config sync.
 # Supports: apt, dnf, yum, pacman, zypper, brew, flatpak, snap, cargo, winget
 #
+# Scope (deliberately bounded — see README "Scope" section):
+#   IN:  packages, repo/PPA sources, dotfiles, DE settings, enabled systemd units
+#   OUT: partitioning, fstab, LUKS, filesystem provisioning — that's cloud-init /
+#        Ansible / Nix territory. pdrx declares what's installed and enabled on
+#        top of an already-provisioned OS, not the OS itself.
+#
 # No Nix dependency. Works on Debian, Ubuntu, Fedora, Arch, openSUSE, Windows (winget), etc.
 
 set -euo pipefail
 
-VERSION="1.6.0"
+VERSION="1.7.0"
 
 # =============================================================================
 # PORTABLE HELPERS
@@ -58,6 +64,14 @@ detect_os_id_like() {
   fi
 }
 
+# FIX (1.7.0): escape a string for safe embedding inside a BRE/ERE grep
+# pattern. Package names can legally contain '.', '+', '[' etc (e.g.
+# "gcc-12", "libssl1.1"); without this, grep patterns built from raw
+# package names can match more (or less) than intended, or error out.
+regex_escape() {
+  printf '%s' "$1" | sed -e 's/[][\\.^$*+?(){}|]/\\&/g'
+}
+
 # =============================================================================
 # DIRECTORIES
 # =============================================================================
@@ -67,10 +81,42 @@ PDRX_CONFIG="$PDRX_HOME/config"
 PDRX_BACKUP="$PDRX_HOME/backups"
 PDRX_STATE="$PDRX_HOME/state"
 PACKAGES_CONF="$PDRX_CONFIG/packages.conf"
+SOURCES_CONF="$PDRX_CONFIG/sources.conf"
+SYSTEMD_CONF="$PDRX_CONFIG/systemd.conf"
 DOTFILES_DIR="$PDRX_CONFIG/dotfiles"
 TRACKED_DOTFILES="$PDRX_STATE/tracked-dotfiles"
 DESKTOP_EXPORT="$PDRX_CONFIG/desktop-export"
 GENERATIONS_FILE="$PDRX_STATE/generations"
+HOOKS_DIR="$PDRX_CONFIG/hooks"
+LOG_FILE="$PDRX_STATE/pdrx.log"
+
+# =============================================================================
+# AUDIT LOG
+# =============================================================================
+
+# FIX (1.7.0): every state-changing action is appended to a JSON-lines audit
+# log so a failed `apply` on a fresh box is diagnosable after the fact, and
+# `pdrx history` can correlate with backups. Best-effort: never fails the
+# calling command if the log can't be written (e.g. read-only home during
+# a container test).
+log_action() {
+  local action="$1" pm="${2:-}" pkg="${3:-}" result="${4:-}" extra="${5:-}"
+  [ -d "$PDRX_STATE" ] || return 0
+  local ts
+  ts=$(date_iso_seconds)
+  printf '{"ts":"%s","action":"%s","pm":"%s","pkg":"%s","result":"%s","extra":"%s"}\n' \
+    "$ts" "$action" "$pm" "$pkg" "$result" "$extra" >> "$LOG_FILE" 2>/dev/null || true
+}
+
+run_history() {
+  require_initialized
+  local n="${1:-30}"
+  if [ ! -f "$LOG_FILE" ]; then
+    log_info "No history yet."
+    return 0
+  fi
+  tail -n "$n" "$LOG_FILE"
+}
 
 # =============================================================================
 # PACKAGE MANAGER REGISTRY
@@ -115,14 +161,9 @@ pm_list_installed() {
   local pm="$1"
   case "$pm" in
     apt)
-      # apt-mark showmanual lists only packages the user explicitly installed.
-      # Packages installed as dependencies (auto) or as part of the base OS
-      # image are marked 'auto' and therefore excluded.
       apt-mark showmanual 2>/dev/null | sort
       ;;
     dnf)
-      # --userinstalled excludes packages pulled in by the OS installer.
-      # Fall back to history userinstalled on older dnf that lacks the flag.
       if dnf repoquery --userinstalled --qf '%{name}' >/dev/null 2>&1; then
         dnf repoquery --userinstalled --qf '%{name}' 2>/dev/null \
           | grep -v '^$' | sort -u
@@ -132,53 +173,37 @@ pm_list_installed() {
       fi
       ;;
     yum)
-      # yum (RHEL 7 / CentOS 7) history userinstalled approximates the same.
       yum history userinstalled 2>/dev/null \
         | awk 'NR>1 {print $1}' | sed 's/\..*//' | sort -u \
         || yum list installed 2>/dev/null \
              | awk 'NR>1 {print $1}' | sed 's/\..*//' | sort -u
       ;;
     pacman)
-      # -Qe = explicitly installed by the user; excludes everything that was
-      # pulled in as a dependency (-Qd).  -q suppresses version numbers.
       pacman -Qeq 2>/dev/null
       ;;
     zypper)
-      # --userinstalled filters to packages whose install reason is "user";
-      # fall back to --installed-only if the flag isn't available (older zypper).
       zypper -q packages --userinstalled 2>/dev/null \
         | awk -F'|' 'NR>3 {gsub(/^ +| +$/,"",$3); if($3!="" && $3!="Name") print $3}' \
         || zypper -q packages --installed-only 2>/dev/null \
              | awk -F'|' 'NR>3 {gsub(/^ +| +$/,"",$3); if($3!="" && $3!="Name") print $3}'
       ;;
     brew)
-      # `brew leaves --installed-on-request` lists formulae the user asked for
-      # directly, omitting everything Homebrew installed as a dependency.
-      # Casks are always user-requested, so list them all.
       brew leaves --installed-on-request 2>/dev/null
       brew list --cask 2>/dev/null
       ;;
     flatpak)
-      # Every Flatpak app is user-initiated — Flatpak never auto-installs apps.
-      # (Runtimes are handled separately and intentionally excluded here.)
       flatpak list --app --columns=application 2>/dev/null \
         || flatpak list --app 2>/dev/null | awk '{print $1}'
       ;;
     snap)
-      # Skip the built-in core and snapd snaps which are present on every
-      # Ubuntu/snap-enabled system and not user-chosen.
       snap list 2>/dev/null \
         | awk 'NR>1 && $1!="core" && $1!="core18" && $1!="core20" \
                     && $1!="core22" && $1!="core24" && $1!="snapd" {print $1}'
       ;;
     cargo)
-      # Every entry in `cargo install --list` was placed there by the user;
-      # Cargo has no concept of auto-installed crates.
       cargo install --list 2>/dev/null | grep '^[a-z]' | sed 's/:$//' | awk '{print $1}'
       ;;
     winget)
-      # Limit to packages sourced from the winget repo, which excludes
-      # pre-installed Windows system components and machine-wide store apps.
       winget list --source winget 2>/dev/null | awk 'NR>3 && NF>=1 {print $1}'
       ;;
     *)
@@ -455,9 +480,16 @@ pm_remove() {
   esac
 }
 
+# FIX (1.7.0): every branch now anchors on the package name instead of doing
+# a bare substring grep, which previously let e.g. "firefox" match
+# "firefox-esr", or "code" match anything containing "code". This directly
+# affects `apply`'s idempotency check (a false positive here means apply
+# silently skips installing a package that isn't actually present).
 pm_is_installed() {
   local pm="$1"
   local pkg="$2"
+  local re
+  re="$(regex_escape "$pkg")"
   case "$pm" in
     apt)
       dpkg -l "$pkg" 2>/dev/null | grep -q '^ii'
@@ -469,22 +501,24 @@ pm_is_installed() {
       pacman -Q "$pkg" >/dev/null 2>&1
       ;;
     zypper)
-      zypper packages --installed-only 2>/dev/null | grep -q "$pkg"
+      zypper packages --installed-only 2>/dev/null \
+        | awk -F'|' -v want="$pkg" '{gsub(/^ +| +$/,"",$3); if ($3==want) f=1} END{exit !f}'
       ;;
     brew)
       brew list "$pkg" >/dev/null 2>&1
       ;;
     flatpak)
-      flatpak list 2>/dev/null | grep -q "$pkg"
+      flatpak list --columns=application 2>/dev/null | grep -qx "$re" \
+        || flatpak list 2>/dev/null | awk '{print $1}' | grep -qx "$re"
       ;;
     snap)
-      snap list 2>/dev/null | grep -q "^$pkg "
+      snap list 2>/dev/null | awk 'NR>1{print $1}' | grep -qx "$re"
       ;;
     cargo)
-      cargo install --list 2>/dev/null | grep -q "^$pkg "
+      cargo install --list 2>/dev/null | awk '{print $1}' | grep -qx "$re"
       ;;
     winget)
-      winget list --id "$pkg" 2>/dev/null | grep -qi "$pkg"
+      winget list --id "$pkg" -e 2>/dev/null | grep -qi -- "$re"
       ;;
     *)
       return 1
@@ -548,6 +582,318 @@ pm_upgrade() {
       return 1
       ;;
   esac
+}
+
+# =============================================================================
+# REPO / PPA / THIRD-PARTY SOURCES  (new in 1.7.0)
+# =============================================================================
+#
+# sources.conf format (one entry per line):
+#   pm:key=value[,value...]
+#
+#   apt:ppa=ppa:deadsnakes/ppa
+#   apt:repo=deb [signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu jammy stable|/etc/apt/keyrings/docker.gpg|https://download.docker.com/linux/ubuntu/gpg
+#   dnf:repo=https://download.docker.com/linux/fedora/docker-ce.repo
+#   zypper:repo=https://download.opensuse.org/repositories/.../repo.repo
+#   flatpak:remote=flathub|https://flathub.org/repo/flathub.flatpakrepo
+#
+# This exists because `pdrx apply` on a genuinely fresh machine previously
+# failed silently for any package outside default distro repos — the #1
+# reason a from-scratch apply didn't actually reproduce a real dev machine.
+# pacman is intentionally NOT supported here: editing /etc/pacman.conf
+# programmatically is high-risk (it's a single shared file, not a drop-in
+# directory) and AUR helpers are out of scope — track those manually.
+
+sources_add() {
+  local pm="$1" kind="$2"; shift 2
+  mkdir -p "$PDRX_CONFIG"
+  touch "$SOURCES_CONF"
+  local line="$pm:$kind=$*"
+  # de-dupe identical lines only; sources can legitimately repeat similar URLs
+  grep -qFx "$line" "$SOURCES_CONF" 2>/dev/null || echo "$line" >> "$SOURCES_CONF"
+}
+
+run_source() {
+  require_initialized
+  local sub="${1:-}"; shift || true
+  case "$sub" in
+    add)
+      local pm="${1:-}"; shift || true
+      [ -z "$pm" ] && { log_error "Usage: pdrx source add <apt|dnf|zypper|flatpak> ..."; exit 1; }
+      case "$pm" in
+        apt)
+          local ppa="${1:-}"
+          [ -z "$ppa" ] && { log_error "Usage: pdrx source add apt <ppa:owner/name | repo-line>"; exit 1; }
+          if [ "${DRY_RUN:-false}" = "true" ]; then
+            log_info "[dry-run] would add apt source: $ppa"
+            return 0
+          fi
+          if [[ "$ppa" == ppa:* ]]; then
+            command -v add-apt-repository >/dev/null 2>&1 \
+              || { log_error "add-apt-repository not found (install software-properties-common)"; exit 1; }
+            sudo add-apt-repository -y "$ppa"
+            sources_add apt ppa "$ppa"
+          else
+            log_error "For raw apt repo lines use: pdrx source add apt-repo <sources-list-line> <keyring-path> <key-url>"
+            exit 1
+          fi
+          sudo apt-get update
+          log_action "source_add" "apt" "$ppa" "ok"
+          log_success "Added apt source: $ppa"
+          ;;
+        apt-repo)
+          local repo_line="${1:-}" keyring="${2:-}" key_url="${3:-}"
+          [ -z "$repo_line" ] || [ -z "$keyring" ] || [ -z "$key_url" ] && {
+            log_error "Usage: pdrx source add apt-repo <'deb ... suite comp'> <keyring-path> <key-url>"; exit 1; }
+          if [ "${DRY_RUN:-false}" = "true" ]; then
+            log_info "[dry-run] would fetch key $key_url -> $keyring and add: $repo_line"
+            return 0
+          fi
+          sudo mkdir -p "$(dirname "$keyring")"
+          curl -fsSL "$key_url" | sudo gpg --dearmor -o "$keyring"
+          local list_name
+          list_name="pdrx-$(echo "$repo_line" | md5sum | cut -c1-8).list"
+          echo "$repo_line" | sudo tee "/etc/apt/sources.list.d/$list_name" >/dev/null
+          sources_add apt repo "$repo_line|$keyring|$key_url"
+          sudo apt-get update
+          log_action "source_add" "apt" "$repo_line" "ok"
+          log_success "Added apt repo (key: $keyring)"
+          ;;
+        dnf|zypper)
+          local repo_url="${1:-}"
+          [ -z "$repo_url" ] && { log_error "Usage: pdrx source add $pm <repo-url-or-.repo-file>"; exit 1; }
+          if [ "${DRY_RUN:-false}" = "true" ]; then
+            log_info "[dry-run] would add $pm repo: $repo_url"
+            return 0
+          fi
+          if [ "$pm" = "dnf" ]; then
+            sudo dnf config-manager --add-repo "$repo_url"
+          else
+            sudo zypper addrepo -f "$repo_url" "pdrx-$(echo "$repo_url" | md5sum | cut -c1-8)"
+            sudo zypper --gpg-auto-import-keys refresh
+          fi
+          sources_add "$pm" repo "$repo_url"
+          log_action "source_add" "$pm" "$repo_url" "ok"
+          log_success "Added $pm repo: $repo_url"
+          ;;
+        flatpak)
+          local name="${1:-}" url="${2:-}"
+          [ -z "$name" ] || [ -z "$url" ] && { log_error "Usage: pdrx source add flatpak <name> <repo-url>"; exit 1; }
+          if [ "${DRY_RUN:-false}" = "true" ]; then
+            log_info "[dry-run] would add flatpak remote: $name -> $url"
+            return 0
+          fi
+          flatpak remote-add --if-not-exists "$name" "$url"
+          sources_add flatpak remote "$name|$url"
+          log_action "source_add" "flatpak" "$name" "ok"
+          log_success "Added flatpak remote: $name"
+          ;;
+        *)
+          log_error "Unsupported: pdrx source add $pm (supported: apt, apt-repo, dnf, zypper, flatpak)"
+          exit 1
+          ;;
+      esac
+      ;;
+    list)
+      log_header "Declared sources"
+      [ -s "$SOURCES_CONF" ] && cat "$SOURCES_CONF" || log_info "No sources declared."
+      ;;
+    apply)
+      _apply_sources
+      ;;
+    *)
+      log_error "Usage: pdrx source <add|list|apply> ..."
+      exit 1
+      ;;
+  esac
+}
+
+# Re-adds every declared source; used by `pdrx apply` and `pdrx source apply`
+# so a from-scratch machine gets repos wired up BEFORE package install runs.
+_apply_sources() {
+  [ -f "$SOURCES_CONF" ] || return 0
+  log_header "Applying declared sources"
+  local line
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    [[ "$line" == \#* ]] && continue
+    local pm="${line%%:*}" rest="${line#*:}"
+    local kind="${rest%%=*}" val="${rest#*=}"
+    case "$pm:$kind" in
+      apt:ppa)
+        if [ "${DRY_RUN:-false}" = "true" ]; then
+          log_info "[dry-run] would ensure apt ppa: $val"
+        else
+          pm_available apt && sudo add-apt-repository -y "$val" 2>/dev/null || true
+        fi
+        ;;
+      apt:repo)
+        local repo_line="${val%%|*}" rem="${val#*|}"
+        local keyring="${rem%%|*}" key_url="${rem#*|}"
+        if [ "${DRY_RUN:-false}" = "true" ]; then
+          log_info "[dry-run] would ensure apt repo: $repo_line"
+        elif pm_available apt; then
+          [ -f "$keyring" ] || { sudo mkdir -p "$(dirname "$keyring")"; curl -fsSL "$key_url" | sudo gpg --dearmor -o "$keyring" 2>/dev/null || true; }
+          local list_name="pdrx-$(echo "$repo_line" | md5sum | cut -c1-8).list"
+          [ -f "/etc/apt/sources.list.d/$list_name" ] \
+            || echo "$repo_line" | sudo tee "/etc/apt/sources.list.d/$list_name" >/dev/null
+        fi
+        ;;
+      dnf:repo)
+        if [ "${DRY_RUN:-false}" = "true" ]; then
+          log_info "[dry-run] would ensure dnf repo: $val"
+        else
+          pm_available dnf && sudo dnf config-manager --add-repo "$val" 2>/dev/null || true
+        fi
+        ;;
+      zypper:repo)
+        if [ "${DRY_RUN:-false}" = "true" ]; then
+          log_info "[dry-run] would ensure zypper repo: $val"
+        else
+          pm_available zypper && sudo zypper addrepo -f "$val" "pdrx-$(echo "$val" | md5sum | cut -c1-8)" 2>/dev/null || true
+        fi
+        ;;
+      flatpak:remote)
+        local name="${val%%|*}" url="${val#*|}"
+        if [ "${DRY_RUN:-false}" = "true" ]; then
+          log_info "[dry-run] would ensure flatpak remote: $name"
+        else
+          pm_available flatpak && flatpak remote-add --if-not-exists "$name" "$url" 2>/dev/null || true
+        fi
+        ;;
+      *) ;;
+    esac
+  done < "$SOURCES_CONF"
+  if pm_available apt && [ "${DRY_RUN:-false}" != "true" ]; then
+    sudo apt-get update 2>/dev/null || true
+  fi
+  log_success "Sources applied"
+}
+
+# =============================================================================
+# SYSTEMD UNITS  (new in 1.7.0)
+# =============================================================================
+#
+# systemd.conf format: scope:unit
+#   system:kanata.service
+#   user:pipewire.service
+#
+# Only ENABLED units are captured (state, not just presence) — mirrors the
+# "user-initiated only" philosophy of pm_list_installed. Masked/disabled
+# units are intentionally not touched by apply (too destructive to automate).
+
+run_sync_systemd() {
+  require_initialized
+  mkdir -p "$PDRX_CONFIG"
+  local tmp
+  tmp=$(mktemp)
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl list-unit-files --state=enabled --no-legend 2>/dev/null \
+      | awk '{print $1}' | grep -v '^$' \
+      | while IFS= read -r u; do echo "system:$u" >> "$tmp"; done || true
+    systemctl --user list-unit-files --state=enabled --no-legend 2>/dev/null \
+      | awk '{print $1}' | grep -v '^$' \
+      | while IFS= read -r u; do echo "user:$u" >> "$tmp"; done || true
+  fi
+  {
+    echo "# pdrx declarative systemd units"
+    echo "# Format: system:unit.service  or  user:unit.service"
+    echo "# Only ENABLED units are tracked. Masked/disabled units are not managed."
+    echo "# Synced: $(date_iso_seconds)"
+    echo ""
+    sort -u "$tmp" 2>/dev/null || true
+  } > "$SYSTEMD_CONF"
+  rm -f "$tmp"
+  log_success "Synced enabled systemd units to $SYSTEMD_CONF"
+}
+
+run_apply_systemd() {
+  [ -f "$SYSTEMD_CONF" ] || return 0
+  command -v systemctl >/dev/null 2>&1 || return 0
+  log_header "Applying declared systemd units"
+  local line count=0
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    [[ "$line" == \#* ]] && continue
+    local scope="${line%%:*}" unit="${line#*:}"
+    [ -z "$unit" ] && continue
+    case "$scope" in
+      system)
+        if systemctl is-enabled "$unit" >/dev/null 2>&1; then
+          continue
+        fi
+        if [ "${DRY_RUN:-false}" = "true" ]; then
+          log_info "[dry-run] would enable (system): $unit"
+        else
+          sudo systemctl enable "$unit" 2>/dev/null \
+            && { count=$((count+1)); log_action "systemd_enable" "system" "$unit" "ok"; } \
+            || log_warning "Could not enable system unit: $unit (not installed?)"
+        fi
+        ;;
+      user)
+        if systemctl --user is-enabled "$unit" >/dev/null 2>&1; then
+          continue
+        fi
+        if [ "${DRY_RUN:-false}" = "true" ]; then
+          log_info "[dry-run] would enable (user): $unit"
+        else
+          systemctl --user enable "$unit" 2>/dev/null \
+            && { count=$((count+1)); log_action "systemd_enable" "user" "$unit" "ok"; } \
+            || log_warning "Could not enable user unit: $unit (not installed?)"
+        fi
+        ;;
+      *) ;;
+    esac
+  done < "$SYSTEMD_CONF"
+  log_success "systemd units applied: $count newly enabled"
+}
+
+# =============================================================================
+# HOOKS  (new in 1.7.0)
+# =============================================================================
+#
+# ~/.pdrx/config/hooks/post-apply.sh, if present and executable, is sourced
+# at the end of `pdrx apply`. This is the deliberate, narrow escape hatch for
+# the handful of things that can't be expressed declaratively — e.g. reloading
+# udev rules after installing a kanata config, or `gnome-extensions enable`.
+# It is versioned/backed-up exactly like dotfiles. Kept singular and opt-in
+# on purpose: pdrx is not becoming a general task runner.
+
+run_apply_hooks() {
+  local hook="$HOOKS_DIR/post-apply.sh"
+  [ -x "$hook" ] || return 0
+  log_header "Running post-apply hook"
+  if [ "${DRY_RUN:-false}" = "true" ]; then
+    log_info "[dry-run] would run: $hook"
+    return 0
+  fi
+  if ( "$hook" ); then
+    log_action "hook" "" "post-apply" "ok"
+    log_success "post-apply hook completed"
+  else
+    log_action "hook" "" "post-apply" "failed"
+    log_warning "post-apply hook exited non-zero"
+  fi
+}
+
+run_hook_edit() {
+  mkdir -p "$HOOKS_DIR"
+  local hook="$HOOKS_DIR/post-apply.sh"
+  if [ ! -f "$hook" ]; then
+    cat > "$hook" << 'HOOKEOF'
+#!/usr/bin/env bash
+# Runs at the end of `pdrx apply`. Keep it idempotent — it may run many times.
+set -euo pipefail
+
+# Example:
+# sudo udevadm control --reload-rules && sudo udevadm trigger
+# gnome-extensions enable someextension@example.com
+HOOKEOF
+    chmod +x "$hook"
+    log_success "Created $hook"
+  else
+    log_info "Hook already exists: $hook"
+  fi
 }
 
 # =============================================================================
@@ -752,8 +1098,10 @@ require_initialized() {
 }
 
 mark_initialized() {
-  mkdir -p "$PDRX_CONFIG" "$PDRX_BACKUP" "$PDRX_STATE" "$DOTFILES_DIR"
+  mkdir -p "$PDRX_CONFIG" "$PDRX_BACKUP" "$PDRX_STATE" "$DOTFILES_DIR" "$HOOKS_DIR"
   touch "$PACKAGES_CONF" 2>/dev/null || true
+  touch "$SOURCES_CONF" 2>/dev/null || true
+  touch "$SYSTEMD_CONF" 2>/dev/null || true
   touch "$TRACKED_DOTFILES" 2>/dev/null || true
   date_iso_seconds > "$PDRX_STATE/initialized"
   echo "$VERSION" > "$PDRX_STATE/version"
@@ -779,7 +1127,7 @@ _parse_conf_line() {
   fi
 }
 
-# FIX: Use proper atomic write with correct tmp handling
+# Atomic write, with pkg-name safely escaped before use in the grep pattern.
 append_packages_conf() {
   local pm="$1"
   local pkg="$2"
@@ -790,10 +1138,12 @@ append_packages_conf() {
   else
     line="$pm:$pkg"
   fi
+  local re
+  re="$(regex_escape "$pkg")"
   local tmp
   tmp=$(mktemp "${PACKAGES_CONF}.XXXXXX")
   if [ -f "$PACKAGES_CONF" ]; then
-    grep -vE "^${pm}:${pkg}(=.*)?$" "$PACKAGES_CONF" > "$tmp" || true
+    grep -vE "^${pm}:${re}(=.*)?$" "$PACKAGES_CONF" > "$tmp" || true
   fi
   echo "$line" >> "$tmp"
   mv "$tmp" "$PACKAGES_CONF"
@@ -803,9 +1153,11 @@ remove_from_packages_conf() {
   local pm="$1"
   local pkg="$2"
   [ -f "$PACKAGES_CONF" ] || return 0
+  local re
+  re="$(regex_escape "$pkg")"
   local tmp
   tmp=$(mktemp "${PACKAGES_CONF}.XXXXXX")
-  grep -vE "^${pm}:${pkg}(=.*)?$" "$PACKAGES_CONF" > "$tmp" || true
+  grep -vE "^${pm}:${re}(=.*)?$" "$PACKAGES_CONF" > "$tmp" || true
   mv "$tmp" "$PACKAGES_CONF"
 }
 
@@ -827,6 +1179,16 @@ run_init() {
   log_info "Available package managers: $pms"
 }
 
+# FIX (1.7.0): `grep -cv PATTERN file || echo 0` double-prints "0\n0" for a
+# zero-match file, because grep -c already writes "0" to stdout before
+# exiting 1 (no match), and the `|| echo 0` fallback then adds a second "0".
+# Pre-existing bug in run_status; fixed here and used for all new counters.
+_count_conf_lines() {
+  local file="$1"
+  [ -f "$file" ] || { echo 0; return; }
+  grep -cv '^#\|^$' "$file" 2>/dev/null | head -1
+}
+
 run_status() {
   require_initialized
   log_header "pdrx Status"
@@ -835,7 +1197,10 @@ run_status() {
   echo "OS:         $(detect_os_id) ($(detect_os_id_like))"
   echo "Desktop:    $(get_desktop_id)"
   echo "PMs:        $(detect_available_pms)"
-  echo "Packages:   $(grep -cv '^#\|^$' "$PACKAGES_CONF" 2>/dev/null || echo 0) in declarative config"
+  echo "Packages:   $(_count_conf_lines "$PACKAGES_CONF") in declarative config"
+  echo "Sources:    $(_count_conf_lines "$SOURCES_CONF") declared"
+  echo "Systemd:    $(_count_conf_lines "$SYSTEMD_CONF") enabled units tracked"
+  echo "Hook:       $([ -x "$HOOKS_DIR/post-apply.sh" ] && echo "present" || echo "none")"
   echo "Backups:    $(find "$PDRX_BACKUP" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)"
 }
 
@@ -894,6 +1259,9 @@ run_install() {
           append_packages_conf "$pm" "$pkg"
           log_success "Installed $pkg via $pm"
         fi
+        log_action "install" "$pm" "$pkg" "ok" "${recorded_version:-}"
+      else
+        log_action "install" "$pm" "$pkg" "failed"
       fi
     else
       log_error "PM $pm not available"
@@ -938,6 +1306,9 @@ run_install_with_pm() {
         append_packages_conf "$pm" "$pkg"
         log_success "Installed $pkg via $pm"
       fi
+      log_action "install" "$pm" "$pkg" "ok" "${recorded_version:-}"
+    else
+      log_action "install" "$pm" "$pkg" "failed"
     fi
   done
 }
@@ -949,8 +1320,10 @@ run_remove() {
 
   local pkg
   for pkg in "${pkgs[@]}"; do
+    local re
+    re="$(regex_escape "$pkg")"
     local line
-    line=$(grep -E ":${pkg}(=.*)?$" "$PACKAGES_CONF" 2>/dev/null | head -1)
+    line=$(grep -E ":${re}(=.*)?$" "$PACKAGES_CONF" 2>/dev/null | head -1)
     if [ -n "$line" ]; then
       local pm="${line%%:*}"
       if [ "${DRY_RUN:-false}" = "true" ]; then
@@ -964,6 +1337,7 @@ run_remove() {
         log_info "PM $pm not available; removing from config only"
       fi
       remove_from_packages_conf "$pm" "$pkg"
+      log_action "remove" "$pm" "$pkg" "ok"
       log_success "Removed $pkg"
     else
       log_warning "Package $pkg not in declarative config. Checking all PMs..."
@@ -976,6 +1350,7 @@ run_remove() {
           fi
           if pm_remove "$pm" "$pkg"; then
             remove_from_packages_conf "$pm" "$pkg"
+            log_action "remove" "$pm" "$pkg" "ok"
             log_success "Removed $pkg from $pm"
           fi
           break
@@ -1041,9 +1416,6 @@ run_search() {
       local idx=0
       local p
 
-      # Announce every PM we are about to query so the user sees immediate
-      # activity, then buffer each PM's results so the final display is
-      # coherent (no interleaved result rows from different PMs).
       printf "\n%sSearching '%s' across %d package manager(s)…%s\n\n" \
         "${BOLD}${CYAN}" "$t" "${#to_search[@]}" "${NC}"
       for p in "${to_search[@]}"; do
@@ -1068,9 +1440,6 @@ run_search() {
         idx=$((idx + 1))
       done
 
-      # Wait for each PM in spawn order; print a live status line as each
-      # one finishes, then display its buffered results immediately so the
-      # user sees output flowing in rather than a single wall at the end.
       idx=0
       local pid
       for pid in "${pids[@]}"; do
@@ -1182,13 +1551,15 @@ run_sync() {
   mv "$atomic_tmp" "$PACKAGES_CONF"
   rm -f "${PACKAGES_CONF}.new"
 
+  run_sync_systemd 2>/dev/null || true
   run_sync_desktop 2>/dev/null || true
-  log_success "Synced packages and desktop state to $PACKAGES_CONF"
+  log_action "sync" "" "" "ok"
+  log_success "Synced packages, sources, systemd units, and desktop state"
 }
 
 run_apply() {
   require_initialized
-  log_header "Apply: install all packages using recorded package managers"
+  log_header "Apply: reproduce declared system state"
 
   local PARALLEL=false
   while [ $# -gt 0 ]; do
@@ -1197,6 +1568,11 @@ run_apply() {
       *) shift ;;
     esac
   done
+
+  # Sources MUST be wired up before package install, or packages outside
+  # default distro repos (docker-ce, PPAs, COPRs, flathub apps) fail to
+  # resolve on a genuinely fresh machine.
+  _apply_sources 2>/dev/null || true
 
   if [ "$PARALLEL" = "true" ]; then
     _run_apply_parallel
@@ -1223,19 +1599,20 @@ run_apply() {
   fi
 
   run_restore_desktop 2>/dev/null || true
+  run_apply_systemd 2>/dev/null || true
+  run_apply_hooks
+  log_action "apply" "" "" "ok" "${PARALLEL:+parallel}"
 }
 
 _run_apply_sequential() {
   local count=0
   local line
   while IFS= read -r line; do
-    # FIX: proper guard instead of short-circuit && chain
     if [[ "$line" == \#* ]] || [ -z "$line" ]; then
       continue
     fi
     _parse_conf_line "$line"
     local pm="$PARSED_PM" pkg="$PARSED_PKG" version="$PARSED_VERSION"
-    # FIX: proper guard instead of [ -z ] || [ -z ] && continue
     if [ -z "$pm" ] || [ -z "$pkg" ]; then
       continue
     fi
@@ -1248,6 +1625,9 @@ _run_apply_sequential() {
         log_info "Installing $pkg via $pm${version:+ (=$version)}"
         if pm_install "$pm" "$pkg" "$version"; then
           count=$((count+1))
+          log_action "apply_install" "$pm" "$pkg" "ok"
+        else
+          log_action "apply_install" "$pm" "$pkg" "failed"
         fi
       fi
     fi
@@ -1256,13 +1636,8 @@ _run_apply_sequential() {
 }
 
 _run_apply_parallel() {
-  # ---------------------------------------------------------------------------
-  # Phase 1: build the per-PM install lists (sequential, cheap)
-  # ---------------------------------------------------------------------------
   declare -A PM_PKGS
-  local pm_group_count=0   # tracks whether any PM has work to do (avoids
-                            # ${#PM_PKGS[@]} which is unbound with set -u on
-                            # bash 5.2 when the array was never assigned a key)
+  local pm_group_count=0
   local line
   while IFS= read -r line; do
     if [[ "$line" == \#* ]] || [ -z "$line" ]; then
@@ -1288,9 +1663,6 @@ _run_apply_parallel() {
     return 0
   fi
 
-  # ---------------------------------------------------------------------------
-  # Phase 2: print the full installation plan before anything runs
-  # ---------------------------------------------------------------------------
   log_header "Apply (parallel): installation plan"
   local pm
   for pm in $(echo "${!PM_PKGS[@]}" | tr ' ' '\n' | sort); do
@@ -1303,22 +1675,8 @@ _run_apply_parallel() {
   done
   echo ""
 
-  # ---------------------------------------------------------------------------
-  # Phase 3: install all PM groups in parallel
-  #
-  # Design:
-  #   • A single lockfile serialises writes so no two subshells interleave a line.
-  #   • Every pm_install line is streamed live — output is NOT buffered to a
-  #     file first.  Each line is prefixed with [pm] and written atomically via
-  #     flock so the terminal stays readable.
-  #   • PIPESTATUS captures pm_install's real exit code through the prefix pipe.
-  #   • Each subshell exits non-zero if any package in its group failed, which
-  #     rolls up into the outer `failed` counter.
-  # ---------------------------------------------------------------------------
   local lockfile
   lockfile=$(mktemp)
-  # shellcheck disable=SC2064
-  trap "rm -f '$lockfile'" RETURN
 
   local pids=()
   for pm in "${!PM_PKGS[@]}"; do
@@ -1326,7 +1684,6 @@ _run_apply_parallel() {
       local pm_ok=0 pm_fail=0
       local entry
 
-      # Helpers: write a tagged line to stdout, serialised across subshells.
       _plog_info()    { flock "$lockfile" echo "${BLUE}[INFO]${NC}    ${CYAN}[$pm]${NC} $*"; }
       _plog_ok()      { flock "$lockfile" echo "${GREEN}[OK]${NC}      ${CYAN}[$pm]${NC} $*"; }
       _plog_warn()    { flock "$lockfile" echo "${YELLOW}[WARNING]${NC} ${CYAN}[$pm]${NC} $*"; }
@@ -1347,10 +1704,6 @@ _run_apply_parallel() {
 
         _plog_info "installing $epkg${eversion:+ (=$eversion)}..."
 
-        # Stream pm_install output live, one prefixed line at a time.
-        # flock ensures no two subshells interleave on a partial line.
-        # The `|| true` after the pipe prevents pipefail from killing the
-        # subshell before we can read PIPESTATUS.
         pm_install "$pm" "$epkg" "$eversion" 2>&1 \
           | while IFS= read -r pmline; do
               _plog_output "$pmline"
@@ -1360,13 +1713,14 @@ _run_apply_parallel() {
         if [ "$install_rc" -eq 0 ]; then
           _plog_ok "$epkg installed successfully"
           pm_ok=$((pm_ok + 1))
+          log_action "apply_install" "$pm" "$epkg" "ok"
         else
           _plog_err "failed to install $epkg (exit $install_rc)"
           pm_fail=$((pm_fail + 1))
+          log_action "apply_install" "$pm" "$epkg" "failed"
         fi
       done
 
-      # Per-PM summary line when this group finishes
       if [ "$pm_fail" -eq 0 ]; then
         _plog_ok "group complete — $pm_ok installed, 0 failed"
       else
@@ -1378,14 +1732,15 @@ _run_apply_parallel() {
     pids+=($!)
   done
 
-  # ---------------------------------------------------------------------------
-  # Phase 4: wait and report overall result
-  # ---------------------------------------------------------------------------
   local failed=0
   local pid
   for pid in "${pids[@]}"; do
     wait "$pid" || failed=$((failed + 1))
   done
+  # FIX (1.7.0): explicit cleanup right after wait drains, instead of relying
+  # solely on a function-local RETURN trap (which could race a background
+  # subshell still holding the flock).
+  rm -f "$lockfile"
 
   echo ""
   if [ "$failed" -gt 0 ]; then
@@ -1454,10 +1809,14 @@ run_backup() {
   local dir="$PDRX_BACKUP/${ts}_${label}"
   mkdir -p "$dir"
   cp "$PACKAGES_CONF" "$dir/packages.conf"
+  [ -f "$SOURCES_CONF" ] && cp "$SOURCES_CONF" "$dir/sources.conf"
+  [ -f "$SYSTEMD_CONF" ] && cp "$SYSTEMD_CONF" "$dir/systemd.conf"
   [ -d "$DESKTOP_EXPORT" ] && cp -R "$DESKTOP_EXPORT" "$dir/desktop-export"
   [ -d "$DOTFILES_DIR" ]   && cp -R "$DOTFILES_DIR"   "$dir/dotfiles"
+  [ -d "$HOOKS_DIR" ]      && cp -R "$HOOKS_DIR"      "$dir/hooks"
   [ -f "$TRACKED_DOTFILES" ] && cp "$TRACKED_DOTFILES" "$dir/tracked-dotfiles"
   echo "$ts" >> "$GENERATIONS_FILE"
+  log_action "backup" "" "" "ok" "$label"
   log_success "Backup: $dir"
 }
 
@@ -1479,9 +1838,13 @@ run_restore() {
   fi
 
   [ -f "$path/packages.conf" ]    && cp "$path/packages.conf" "$PACKAGES_CONF"
+  [ -f "$path/sources.conf" ]     && cp "$path/sources.conf" "$SOURCES_CONF"
+  [ -f "$path/systemd.conf" ]     && cp "$path/systemd.conf" "$SYSTEMD_CONF"
   [ -d "$path/desktop-export" ]   && rm -rf "$DESKTOP_EXPORT" && cp -R "$path/desktop-export" "$DESKTOP_EXPORT"
   [ -d "$path/dotfiles" ]         && rm -rf "$DOTFILES_DIR"   && cp -R "$path/dotfiles" "$DOTFILES_DIR"
+  [ -d "$path/hooks" ]            && rm -rf "$HOOKS_DIR"      && cp -R "$path/hooks" "$HOOKS_DIR"
   [ -f "$path/tracked-dotfiles" ] && cp "$path/tracked-dotfiles" "$TRACKED_DOTFILES"
+  log_action "restore" "" "" "ok" "$path"
   log_success "Restored from $path"
 }
 
@@ -1630,13 +1993,11 @@ run_rollback() {
   local n="${1:-1}"
   local dirs=()
   local d
-  # Use oldest-first list, then count from end for "most recent = N"
   while IFS= read -r d; do
     [ -n "$d" ] && dirs+=("$d")
   done < <(_list_backup_dirs_oldest_first)
   local total=${#dirs[@]}
   [ "$total" -eq 0 ] && { log_error "No backups found"; exit 1; }
-  # N=1 means most recent (last in oldest-first list)
   local idx=$(( total - n ))
   if [ "$idx" -lt 0 ]; then
     log_error "No backup #$n (only $total backup(s) exist)"
@@ -1695,7 +2056,7 @@ run_destroy() {
   echo "  • Remove $PDRX_HOME (config, backups, state)"
   echo "  • Remove pdrx from ~/.local/bin"
   echo ""
-  echo "Installed packages will NOT be uninstalled."
+  echo "Installed packages, added repo sources, and enabled systemd units will NOT be reverted."
   echo ""
   if [ "${YES:-false}" != "true" ]; then
     printf "Type 'yes' to continue: "
@@ -1760,47 +2121,104 @@ run_install_self() {
 }
 
 # =============================================================================
-# SELF-UPDATE
+# SELF-UPDATE  (hardened in 1.7.0)
 # =============================================================================
+#
+# FIX (1.7.0): previously curled a raw script from GitHub and chmod +x/
+# replaced the running binary with ZERO integrity verification — anyone able
+# to MITM the connection or briefly compromise the repo/CDN got arbitrary
+# code execution on every machine that ran `pdrx self-update`. This now:
+#   1. Pins to a tagged release asset instead of the mutable `main` branch.
+#   2. Downloads the accompanying .sha256 checksum file published in the
+#      same release and verifies the script against it before replacing
+#      the installed binary.
+#   3. Refuses to proceed (rather than silently trusting) if the checksum
+#      file is missing or doesn't match.
+#
+# NOTE: this requires the pdrx release process to publish `pdrx` and
+# `pdrx.sha256` (or a combined SHA256SUMS file) as GitHub release assets —
+# see the PR description for the accompanying release workflow change.
 
 run_self_update() {
   log_header "Self-update pdrx"
   local install_path
   install_path="$(get_script_path)"
-  local remote_version
-  local remote_url="https://raw.githubusercontent.com/stefan-hacks/pdrx/main/pdrx"
 
   if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
     log_error "curl or wget is required for self-update"
     exit 1
   fi
-
-  log_info "Checking latest version..."
-  local tmp
-  tmp=$(mktemp)
-  if command -v curl >/dev/null 2>&1; then
-    curl -sSL "$remote_url" -o "$tmp" || { log_error "Failed to download update"; rm -f "$tmp"; exit 1; }
-  else
-    wget -qO "$tmp" "$remote_url" || { log_error "Failed to download update"; rm -f "$tmp"; exit 1; }
-  fi
-
-  remote_version=$(grep '^VERSION=' "$tmp" | head -1 | cut -d'"' -f2)
-  if [ -z "$remote_version" ]; then
-    log_error "Could not determine remote version"
-    rm -f "$tmp"
+  if ! command -v sha256sum >/dev/null 2>&1; then
+    log_error "sha256sum is required for self-update (integrity verification)"
     exit 1
   fi
 
+  log_info "Checking latest release..."
+  local api_url="https://api.github.com/repos/stefan-hacks/pdrx/releases/latest"
+  local rel_json
+  rel_json=$(_fetch_url "$api_url") || { log_error "Failed to query latest release"; exit 1; }
+
+  local tag
+  tag=$(printf '%s' "$rel_json" | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+  [ -z "$tag" ] && { log_error "Could not determine latest release tag"; exit 1; }
+
+  local remote_version="${tag#v}"
   if [ "$remote_version" = "$VERSION" ]; then
     log_info "Already up to date (v$VERSION)"
-    rm -f "$tmp"
     return 0
   fi
 
+  local script_url="https://github.com/stefan-hacks/pdrx/releases/download/${tag}/pdrx"
+  local sum_url="https://github.com/stefan-hacks/pdrx/releases/download/${tag}/pdrx.sha256"
+
+  local tmp tmp_sum
+  tmp=$(mktemp)
+  tmp_sum=$(mktemp)
+  _fetch_to_file "$script_url" "$tmp" || { log_error "Failed to download pdrx $tag"; rm -f "$tmp" "$tmp_sum"; exit 1; }
+  if ! _fetch_to_file "$sum_url" "$tmp_sum"; then
+    log_error "Could not download checksum file (pdrx.sha256) for $tag — refusing to install unverified update."
+    log_error "This is a hard stop: self-update never replaces the binary without a verified checksum."
+    rm -f "$tmp" "$tmp_sum"
+    exit 1
+  fi
+
+  local expected actual
+  expected=$(awk '{print $1}' "$tmp_sum" | head -1)
+  actual=$(sha256sum "$tmp" | awk '{print $1}')
+  if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
+    log_error "Checksum verification FAILED for $tag."
+    log_error "  expected: ${expected:-<empty>}"
+    log_error "  actual:   $actual"
+    log_error "Not installing. This could mean a corrupted download or a tampered release — investigate before retrying."
+    rm -f "$tmp" "$tmp_sum"
+    exit 1
+  fi
+
+  log_success "Checksum verified ($actual)"
   log_info "Updating $VERSION → $remote_version"
   chmod +x "$tmp"
   mv "$tmp" "$install_path"
+  rm -f "$tmp_sum"
+  log_action "self_update" "" "" "ok" "$VERSION->$remote_version"
   log_success "Updated pdrx to v$remote_version. Re-run pdrx to use the new version."
+}
+
+_fetch_url() {
+  local url="$1"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL -H "Accept: application/vnd.github+json" "$url"
+  else
+    wget -qO- "$url"
+  fi
+}
+
+_fetch_to_file() {
+  local url="$1" dest="$2"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$url" -o "$dest"
+  else
+    wget -qO "$dest" "$url"
+  fi
 }
 
 # =============================================================================
@@ -1811,6 +2229,10 @@ show_help() {
   cat << EOF
 ${BOLD}${CYAN}pdrx v${VERSION} - Portable Dynamic Reproducible gnu/linuX${NC}
 Pure Bash reproducible system setup. No Nix. Works on all major Linux distros + Windows (winget).
+
+${BOLD}SCOPE:${NC} packages, repo sources, dotfiles, DE settings, enabled systemd units.
+Deliberately NOT in scope: partitioning, fstab, LUKS, OS provisioning — use
+cloud-init / Ansible / Nix for that layer; pdrx assumes it already exists.
 
 ${BOLD}USAGE:${NC} pdrx [OPTIONS] COMMAND [ARGS...]
 
@@ -1826,7 +2248,7 @@ ${BOLD}OPTIONS:${NC}
 
 ${BOLD}COMMANDS:${NC}
   init                            Initialize pdrx
-  status                          Show status (config, PMs, packages)
+  status                          Show status (config, PMs, packages, sources, units)
   install [--pin[=VER]] [pkg...]  Install package(s); --pin records the installed version
   install --pm PM [--pin[=VER]] [pkg...]
                                   Install with a specific PM
@@ -1834,10 +2256,14 @@ ${BOLD}COMMANDS:${NC}
   list                            List packages in declarative config
   search [--parallel] TERM [1 2 ...]
                                   Search across PMs (optional PM numbers; --parallel for speed)
-  sync                            Sync current system state into declarative config
-  apply [--parallel]              Apply declarative config (install all packages)
+  source add <pm> ...             Declare a repo/PPA/remote (apt, apt-repo, dnf, zypper, flatpak)
+  source list                     List declared sources
+  source apply                    Re-apply all declared sources (also runs at start of 'apply')
+  sync                            Sync packages, sources refs, systemd units, and desktop into config
+  apply [--parallel]              Apply full declarative config (sources → packages → dotfiles → DE → units → hook)
   track FILE                      Track dotfile (copy + symlink)
   untrack FILE                    Untrack dotfile
+  hook edit                       Create/open the post-apply hook script (~/.pdrx/config/hooks/post-apply.sh)
   backup [LABEL]                  Create a backup
   restore PATH                    Restore config from backup path
   generations                     List backups with reference numbers
@@ -1845,9 +2271,10 @@ ${BOLD}COMMANDS:${NC}
   rollback [N]                    Rollback to Nth most-recent backup (default: 1 = newest)
   sync-desktop                    Export desktop/DE state
   sync-desktop --restore          Restore desktop state
+  history [N]                     Show last N audit log entries (default 30)
   update                          Refresh all PM package indexes
   upgrade                         Upgrade all packages via each PM
-  self-update                     Update pdrx itself to the latest version
+  self-update                     Update pdrx itself (checksum-verified, pinned to latest release)
   export [FILE]                   Export config as tarball
   import FILE                     Import config from tarball
   destroy                         Restore dotfiles and remove pdrx (-y skips prompt)
@@ -1860,16 +2287,17 @@ ${BOLD}DECLARATIVE FORMAT (packages.conf):${NC}
   pm:package=version      pinned version (written by install --pin)
 
 ${BOLD}EXAMPLES:${NC}
-  pdrx install vim                    # interactive PM selection
-  pdrx install --pm apt vim           # install via apt
-  pdrx install --pm cargo rg --pin    # install and pin current version
-  pdrx install --pm apt vim --pin=9.0 # install specific version and pin
-  pdrx remove vim                     # remove (uses recorded PM)
-  pdrx -n remove vim                  # dry-run: preview removal
-  pdrx search ripgrep --parallel      # search all PMs in parallel
-  pdrx apply --parallel               # install all packages (parallel across PMs)
-  pdrx self-update                    # update pdrx to latest version
-  pdrx upgrade                        # upgrade all packages
+  pdrx install vim                            # interactive PM selection
+  pdrx install --pm apt vim                   # install via apt
+  pdrx install --pm cargo rg --pin            # install and pin current version
+  pdrx source add apt-repo 'deb [...] jammy stable' /etc/apt/keyrings/docker.gpg https://download.docker.com/linux/ubuntu/gpg
+  pdrx source add dnf https://download.docker.com/linux/fedora/docker-ce.repo
+  pdrx remove vim                             # remove (uses recorded PM)
+  pdrx -n apply --parallel                    # dry-run a full parallel restore
+  pdrx hook edit                              # add custom post-apply glue (udev reload, etc.)
+  pdrx self-update                            # checksum-verified update to latest release
+  pdrx upgrade                                # upgrade all packages
+  pdrx history 50                             # show last 50 audit log entries
 
 EOF
 }
@@ -1906,10 +2334,14 @@ PDRX_CONFIG="$PDRX_HOME/config"
 PDRX_BACKUP="$PDRX_HOME/backups"
 PDRX_STATE="$PDRX_HOME/state"
 PACKAGES_CONF="$PDRX_CONFIG/packages.conf"
+SOURCES_CONF="$PDRX_CONFIG/sources.conf"
+SYSTEMD_CONF="$PDRX_CONFIG/systemd.conf"
 DOTFILES_DIR="$PDRX_CONFIG/dotfiles"
 TRACKED_DOTFILES="$PDRX_STATE/tracked-dotfiles"
 DESKTOP_EXPORT="$PDRX_CONFIG/desktop-export"
 GENERATIONS_FILE="$PDRX_STATE/generations"
+HOOKS_DIR="$PDRX_CONFIG/hooks"
+LOG_FILE="$PDRX_STATE/pdrx.log"
 
 [ $# -eq 0 ] && { show_help; exit 0; }
 
@@ -1935,10 +2367,19 @@ case "$CMD" in
   remove)      run_remove "$@" ;;
   list)        run_list "$@" ;;
   search)      run_search "$@" ;;
+  source)      run_source "$@" ;;
   sync)        run_sync "$@" ;;
   apply)       run_apply "$@" ;;
   track)       run_track "$@" ;;
   untrack)     run_untrack "$@" ;;
+  hook)
+    if [ "${1:-}" = "edit" ]; then
+      run_hook_edit
+    else
+      log_error "Usage: pdrx hook edit"
+      exit 1
+    fi
+    ;;
   backup)      run_backup "$@" ;;
   restore)     run_restore "$@" ;;
   generations) run_generations "$@" ;;
@@ -1951,6 +2392,7 @@ case "$CMD" in
       run_sync_desktop
     fi
     ;;
+  history)     run_history "$@" ;;
   update)      run_update "$@" ;;
   upgrade)     run_upgrade "$@" ;;
   self-update) run_self_update ;;
