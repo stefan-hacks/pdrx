@@ -16,7 +16,7 @@
 <!-- Badges -->
 <p align="center">
   <a href="https://github.com/stefan-hacks/pdrx/releases">
-    <img src="https://img.shields.io/badge/version-1.7.3-2ea043?style=for-the-badge&logo=semver&logoColor=white" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.8.0-2ea043?style=for-the-badge&logo=semver&logoColor=white" alt="version" />
   </a>
   <a href="#">
     <img src="https://img.shields.io/badge/pure_bash-121011?style=for-the-badge&logo=gnu-bash&logoColor=white" alt="bash" />
@@ -255,14 +255,23 @@ pdrx list                        # List captured packages
 pdrx search <term>               # Search across all PMs
 ```
 
-### Maintenance
+### Maintenance Commands
 
 ```bash
-pdrx backup [label]         # Create checkpoint
-pdrx rollback [N]           # Rollback to backup
-pdrx status                 # Show system overview
-pdrx history [N]            # Show audit log
-pdrx self-update            # Update pdrx
+pdrx export [FILE]              # Export config as tarball
+pdrx export --ansible [DIR]     # Export as Ansible playbook (v1.8.0+)
+pdrx backup [label]             # Create checkpoint
+pdrx rollback [N]               # Rollback to backup
+pdrx status                     # Show system overview
+pdrx history [N]                # Show audit log
+pdrx self-update                # Update pdrx
+```
+
+**Ansible Export** (New in 1.8.0): Generate a complete Ansible playbook from your pdrx config:
+```bash
+pdrx export --ansible ./my-playbook
+cd my-playbook
+ansible-playbook -i inventory site.yml --check
 ```
 
 ---

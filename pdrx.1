@@ -1,7 +1,7 @@
 .\" pdrx.1 - man page for pdrx
 .\" Portable Dynamic Reproducible gnu/linuX - reproducible Linux system setup
 .\" Use: groff -man -Tutf8 pdrx.1 | less
-.TH pdrx 1 "2025-07-11" "pdrx 1.7.3" "User Commands"
+.TH pdrx 1 "2025-07-12" "pdrx 1.8.0" "User Commands"
 .SH NAME
 pdrx \- Portable Dynamic Reproducible gnu/linuX: reproducible Linux system setup with declarative package config
 .SH SYNOPSIS
@@ -331,6 +331,14 @@ Export the entire pdrx config (packages, sources, systemd units, dotfiles, deskt
 .B pdrx export my-config.tar.gz
 .br
 .B pdrx export \> my-config.tar.gz
+.RE
+.SS "export --ansible"
+Export the pdrx config as a runnable Ansible playbook and role. Creates a complete Ansible project structure with inventory, playbook, roles, and README. Useful for sharing with teams or applying via CI/CD systems.
+.PP
+.RS
+.B pdrx export --ansible ./my-playbook
+.br
+.B cd my-playbook \&\& ansible-playbook -i inventory site.yml --check
 .RE
 .SS import
 Import a pdrx config from a tarball created by \fBexport\fR. Extracts into \fBPDRX_HOME\fR.
