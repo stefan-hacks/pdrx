@@ -1776,8 +1776,32 @@ run_track() {
   local f
   for f in "$@"; do
     local abs
-    abs=$(cd "$(dirname "$f")" 2>/dev/null && pwd)/$(basename "$f")
-    [ -f "$abs" ] || abs="$HOME/$f"
+    # If path is absolute, use it; otherwise resolve relative to home
+    if [[ "$f" == /* ]]; then
+      abs="$f"
+    else
+      abs="$HOME/$f"
+    fi
+
+    # Handle directory tracking
+    if [ -d "$abs" ]; then
+      log_info "Tracking directory: $abs"
+      local tracked_count=0
+      # Find all files in the directory (recursively), excluding symlinks that point into DOTFILES_DIR
+      while IFS= read -r -d '' file_in_dir; do
+        local rel="${file_in_dir#"$HOME"/}"
+        local dest="$DOTFILES_DIR/$rel"
+        mkdir -p "$(dirname "$dest")"
+        cp "$file_in_dir" "$dest"
+        grep -qFx "$rel" "$TRACKED_DOTFILES" 2>/dev/null || echo "$rel" >> "$TRACKED_DOTFILES"
+        ln -sf "$dest" "$file_in_dir" 2>/dev/null || true
+        tracked_count=$((tracked_count + 1))
+      done < <(find "$abs" -type f -print0 2>/dev/null)
+      log_success "Tracked $tracked_count files from directory"
+      continue
+    fi
+
+    # Handle single file tracking (original behavior)
     if [ ! -f "$abs" ]; then
       log_error "File not found: $f"
       continue
@@ -1796,6 +1820,36 @@ run_untrack() {
   require_initialized
   local f
   for f in "$@"; do
+    local abs
+    # If path is absolute, use it; otherwise resolve relative to home
+    if [[ "$f" == /* ]]; then
+      abs="$f"
+    else
+      abs="$HOME/$f"
+    fi
+
+    # Handle directory untracking
+    if [ -d "$abs" ]; then
+      log_info "Untracking directory: $abs"
+      local rel="${abs#"$HOME"/}"
+      [[ "$rel" == "$abs" ]] && rel="$f"
+
+      if [ -f "$TRACKED_DOTFILES" ]; then
+        local tmp
+        tmp=$(mktemp "${TRACKED_DOTFILES}.XXXXXX")
+        # Remove all entries that start with this directory path
+        grep -v "^${rel}/" "$TRACKED_DOTFILES" > "$tmp" || true
+        mv "$tmp" "$TRACKED_DOTFILES"
+      fi
+
+      # Remove tracked files from DOTFILES_DIR
+      local dest="$DOTFILES_DIR/$rel"
+      [ -d "$dest" ] && rm -rf "$dest"
+      log_success "Untracked directory $rel"
+      continue
+    fi
+
+    # Handle single file untracking (original behavior)
     local rel="${f#"$HOME"/}"
     [[ "$rel" == "$f" ]] && rel="$f"
     if [ -f "$TRACKED_DOTFILES" ]; then
