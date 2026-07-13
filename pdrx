@@ -1776,9 +1776,14 @@ run_track() {
   local f
   for f in "$@"; do
     local abs
-    # If path is absolute, use it; otherwise resolve relative to home
+    # Path resolution priority:
+    # 1. If absolute path (starts with /), use it
+    # 2. If exists in current directory, use relative to PWD (for shell glob like *)
+    # 3. Otherwise, resolve relative to $HOME
     if [[ "$f" == /* ]]; then
       abs="$f"
+    elif [ -e "$PWD/$f" ]; then
+      abs="$PWD/$f"
     else
       abs="$HOME/$f"
     fi
