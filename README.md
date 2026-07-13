@@ -15,7 +15,7 @@
 <!-- Dynamic Badges -->
 <p align="center">
   <a href="https://github.com/stefan-hacks/pdrx/releases">
-    <img src="https://img.shields.io/badge/v1.8.0-2ea043?style=for-the-badge&logo=semver&logoColor=white&label=version" alt="version" />
+    <img src="https://img.shields.io/badge/v1.8.1-2ea043?style=for-the-badge&logo=semver&logoColor=white&label=version" alt="version" />
   </a>
   <a href="#features">
     <img src="https://img.shields.io/badge/Ansible%20Export-EE0000?style=for-the-badge&logo=ansible&logoColor=white" alt="ansible" />
@@ -48,7 +48,22 @@
 
 ---
 
-## ✨ What's New in v1.8.0
+## ✨ What's New in v1.8.1
+
+### 🐛 **Critical Bug Fixes** — Thanks to @waldyrious
+
+<div align="center">
+
+| Fix | Description |
+|-----|-------------|
+| <img src="https://img.shields.io/badge/CRITICAL-d73a4a?style=flat-square" /> | **Directory tracking** — `pdrx track ~/.config/dir` now works correctly instead of failing with "File not found" |
+| <img src="https://img.shields.io/badge/CRITICAL-d73a4a?style=flat-square" /> | **File restoration** — `pdrx untrack` now restores original files to their locations instead of leaving broken symlinks |
+
+</div>
+
+---
+
+## 📦 Previous: v1.8.0
 
 <div align="center">
 
