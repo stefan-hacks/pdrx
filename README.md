@@ -48,7 +48,7 @@
 
 ---
 
-## ✨ What's New in v1.8.1
+## ✨ What's New in v1.8.1 - CURRENTLY WORKING ON UNTRACK features restore WILL UPDATE ONCE ready
 
 ### 🐛 **Critical Bug Fixes** — Thanks to @waldyrious
 
