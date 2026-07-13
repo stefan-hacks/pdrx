@@ -1834,6 +1834,22 @@ run_untrack() {
       local rel="${abs#"$HOME"/}"
       [[ "$rel" == "$abs" ]] && rel="$f"
 
+      # CRITICAL: Restore all tracked files from DOTFILES_DIR back to their original locations
+      # before removing the symlinked directory. This prevents data loss.
+      if [ -d "$DOTFILES_DIR/$rel" ]; then
+        while IFS= read -r -d '' tracked_file; do
+          # Calculate the relative path within the tracked directory
+          local file_rel="${tracked_file#$DOTFILES_DIR/$rel/}"
+          local original_path="$abs/$file_rel"
+
+          # Remove the symlink and restore the actual file content
+          if [ -L "$original_path" ]; then
+            rm -f "$original_path"
+            cp "$tracked_file" "$original_path"
+          fi
+        done < <(find "$DOTFILES_DIR/$rel" -type f -print0 2>/dev/null)
+      fi
+
       if [ -f "$TRACKED_DOTFILES" ]; then
         local tmp
         tmp=$(mktemp "${TRACKED_DOTFILES}.XXXXXX")
@@ -1845,22 +1861,32 @@ run_untrack() {
       # Remove tracked files from DOTFILES_DIR
       local dest="$DOTFILES_DIR/$rel"
       [ -d "$dest" ] && rm -rf "$dest"
-      log_success "Untracked directory $rel"
+      log_success "Untracked directory $rel (files restored)"
       continue
     fi
 
     # Handle single file untracking (original behavior)
     local rel="${f#"$HOME"/}"
     [[ "$rel" == "$f" ]] && rel="$f"
+    local dest="$DOTFILES_DIR/$rel"
+
+    # CRITICAL: Restore the file from DOTFILES_DIR back to its original location
+    # before removing the tracked copy. This prevents data loss.
+    if [ -L "$abs" ] && [ -f "$dest" ]; then
+      rm -f "$abs"
+      cp "$dest" "$abs"
+      log_info "Restored: $abs"
+    fi
+
     if [ -f "$TRACKED_DOTFILES" ]; then
       local tmp
       tmp=$(mktemp "${TRACKED_DOTFILES}.XXXXXX")
       grep -vFx "$rel" "$TRACKED_DOTFILES" > "$tmp" || true
       mv "$tmp" "$TRACKED_DOTFILES"
     fi
-    local dest="$DOTFILES_DIR/$rel"
+
     [ -f "$dest" ] && rm -f "$dest"
-    log_success "Untracked $rel"
+    log_success "Untracked $rel (file restored)"
   done
 }
 
