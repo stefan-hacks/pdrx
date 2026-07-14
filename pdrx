@@ -16,7 +16,7 @@
 
 set -euo pipefail
 
-VERSION="1.8.2"
+VERSION="1.8.3"
 
 # =============================================================================
 # PORTABLE HELPERS
@@ -1790,8 +1790,36 @@ run_track() {
   local f
   for f in "$@"; do
     local abs
-    abs=$(cd "$(dirname "$f")" 2>/dev/null && pwd)/$(basename "$f")
-    [ -f "$abs" ] || abs="$HOME/$f"
+    # Path resolution priority:
+    # 1. If absolute path (starts with /), use it
+    # 2. If exists in current directory, use relative to PWD (for shell glob like *)
+    # 3. Otherwise, resolve relative to $HOME
+    if [[ "$f" == /* ]]; then
+      abs="$f"
+    elif [ -e "$PWD/$f" ]; then
+      abs="$PWD/$f"
+    else
+      abs="$HOME/$f"
+    fi
+
+    # Handle directory tracking
+    if [ -d "$abs" ]; then
+      log_info "Tracking directory: $abs"
+      local tracked_count=0
+      while IFS= read -r -d '' file_in_dir; do
+        local rel="${file_in_dir#"$HOME"/}"
+        local dest="$DOTFILES_DIR/$rel"
+        mkdir -p "$(dirname "$dest")"
+        cp "$file_in_dir" "$dest"
+        grep -qFx "$rel" "$TRACKED_DOTFILES" 2>/dev/null || echo "$rel" >> "$TRACKED_DOTFILES"
+        ln -sf "$dest" "$file_in_dir" 2>/dev/null || true
+        tracked_count=$((tracked_count + 1))
+      done < <(find "$abs" -type f -print0 2>/dev/null)
+      log_success "Tracked $tracked_count files from directory $f"
+      continue
+    fi
+
+    # Handle file tracking (original logic)
     if [ ! -f "$abs" ]; then
       log_error "File not found: $f"
       continue
@@ -1810,13 +1838,86 @@ run_untrack() {
   require_initialized
   local f
   for f in "$@"; do
+    local abs
+    # Path resolution priority (same as run_track):
+    # 1. If absolute path (starts with /), use it
+    # 2. If exists in current directory, use relative to PWD
+    # 3. Otherwise, resolve relative to $HOME
+    if [[ "$f" == /* ]]; then
+      abs="$f"
+    elif [ -e "$PWD/$f" ]; then
+      abs="$PWD/$f"
+    else
+      abs="$HOME/$f"
+    fi
+
+    # Handle directory untracking
+    if [ -d "$abs" ]; then
+      log_info "Untracking directory: $abs"
+      local untracked_count=0
+      # Get all tracked files that are within this directory
+      if [ -f "$TRACKED_DOTFILES" ]; then
+        while IFS= read -r tracked_file; do
+          [ -z "$tracked_file" ] && continue
+          # Check if tracked file is within the target directory
+          if [[ "$tracked_file" == "${abs#$HOME/}"* ]] || \
+             [[ "$tracked_file" == "$f"* ]] || \
+             [[ "$abs/$tracked_file" == "$abs"/* ]]; then
+            local target="$HOME/$tracked_file"
+            local dest="$DOTFILES_DIR/$tracked_file"
+
+            if [ "${DRY_RUN:-false}" = "true" ]; then
+              log_info "[dry-run] would untrack $tracked_file from within directory $f"
+              continue
+            fi
+
+            # Restore file if it's a symlink
+            if [ -L "$target" ]; then
+              rm -f "$target"
+              if [ -f "$dest" ]; then
+                mkdir -p "$(dirname "$target")"
+                cp "$dest" "$target"
+                log_success "Restored $tracked_file (symlink replaced with real file)"
+              else
+                log_warning "Removed dangling symlink at $tracked_file"
+              fi
+            elif [ -e "$target" ] && [ -f "$dest" ]; then
+              # Target exists but isn't a symlink - still try to restore
+              cp -f "$dest" "$target"
+              log_success "Restored $tracked_file (overwrote existing)"
+            elif [ -f "$dest" ]; then
+              # Target missing, restore from backup
+              mkdir -p "$(dirname "$target")"
+              cp "$dest" "$target"
+              log_success "Restored $tracked_file (was missing)"
+            fi
+
+            # Remove the stored copy
+            [ -f "$dest" ] && rm -f "$dest"
+            # Clean up empty directories
+            [ -d "$(dirname "$dest")" ] && rmdir -p "$(dirname "$dest")" 2>/dev/null || true
+
+            # Remove from tracked-dotfiles
+            if [ -f "$TRACKED_DOTFILES" ]; then
+              local tmp
+              tmp=$(mktemp "${TRACKED_DOTFILES}.XXXXXX")
+              grep -vFx "$tracked_file" "$TRACKED_DOTFILES" > "$tmp" || true
+              mv "$tmp" "$TRACKED_DOTFILES"
+            fi
+
+            log_action "untrack" "" "$tracked_file" "ok"
+            untracked_count=$((untracked_count + 1))
+          fi
+        done < "$TRACKED_DOTFILES"
+      fi
+      log_success "Untracked $untracked_count files from directory $f"
+      continue
+    fi
+
+    # Single file untracking (original logic)
     local rel
     # Resolve to a path relative to $HOME, using the same convention
     # tracked-dotfiles stores paths in (mirrors run_track's resolution):
-    #   - absolute path under $HOME -> strip the $HOME/ prefix
-    #   - absolute path elsewhere   -> not something pdrx can track; skip
-    #   - anything else (bare relative, e.g. ".bashrc" or ".config/x/y")
-    #     -> used as-is, exactly as stored in tracked-dotfiles
     case "$f" in
       "$HOME"/*) rel="${f#"$HOME"/}" ;;
       /*)
@@ -1869,6 +1970,8 @@ run_untrack() {
     fi
 
     [ -f "$dest" ] && rm -f "$dest"
+    # Clean up empty directories in DOTFILES_DIR
+    [ -d "$(dirname "$dest")" ] && rmdir -p "$(dirname "$dest")" 2>/dev/null || true
 
     if [ -f "$TRACKED_DOTFILES" ]; then
       local tmp
