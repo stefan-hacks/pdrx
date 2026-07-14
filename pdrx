@@ -16,7 +16,7 @@
 
 set -euo pipefail
 
-VERSION="1.8.3"
+VERSION="1.8.2"
 
 # =============================================================================
 # PORTABLE HELPERS
@@ -624,6 +624,7 @@ run_source() {
         apt)
           local ppa="${1:-}"
           [ -z "$ppa" ] && { log_error "Usage: pdrx source add apt <ppa:owner/name | repo-line>"; exit 1; }
+          pm_available apt || { log_error "apt is not available on this system"; exit 1; }
           if [ "${DRY_RUN:-false}" = "true" ]; then
             log_info "[dry-run] would add apt source: $ppa"
             return 0
@@ -645,6 +646,7 @@ run_source() {
           local repo_line="${1:-}" keyring="${2:-}" key_url="${3:-}"
           [ -z "$repo_line" ] || [ -z "$keyring" ] || [ -z "$key_url" ] && {
             log_error "Usage: pdrx source add apt-repo <'deb ... suite comp'> <keyring-path> <key-url>"; exit 1; }
+          pm_available apt || { log_error "apt is not available on this system"; exit 1; }
           if [ "${DRY_RUN:-false}" = "true" ]; then
             log_info "[dry-run] would fetch key $key_url -> $keyring and add: $repo_line"
             return 0
@@ -662,6 +664,7 @@ run_source() {
         dnf|zypper)
           local repo_url="${1:-}"
           [ -z "$repo_url" ] && { log_error "Usage: pdrx source add $pm <repo-url-or-.repo-file>"; exit 1; }
+          pm_available "$pm" || { log_error "$pm is not available on this system"; exit 1; }
           if [ "${DRY_RUN:-false}" = "true" ]; then
             log_info "[dry-run] would add $pm repo: $repo_url"
             return 0
@@ -679,6 +682,7 @@ run_source() {
         flatpak)
           local name="${1:-}" url="${2:-}"
           [ -z "$name" ] || [ -z "$url" ] && { log_error "Usage: pdrx source add flatpak <name> <repo-url>"; exit 1; }
+          pm_available flatpak || { log_error "flatpak is not available on this system"; exit 1; }
           if [ "${DRY_RUN:-false}" = "true" ]; then
             log_info "[dry-run] would add flatpak remote: $name -> $url"
             return 0
@@ -696,11 +700,7 @@ run_source() {
       ;;
     list)
       log_header "Declared sources"
-      if [ -s "$SOURCES_CONF" ]; then
-        cat "$SOURCES_CONF"
-      else
-        log_info "No sources declared."
-      fi
+      [ -s "$SOURCES_CONF" ] && cat "$SOURCES_CONF" || log_info "No sources declared."
       ;;
     apply)
       _apply_sources
@@ -727,8 +727,8 @@ _apply_sources() {
       apt:ppa)
         if [ "${DRY_RUN:-false}" = "true" ]; then
           log_info "[dry-run] would ensure apt ppa: $val"
-        elif pm_available apt; then
-          sudo add-apt-repository -y "$val" 2>/dev/null || true
+        else
+          pm_available apt && sudo add-apt-repository -y "$val" 2>/dev/null || true
         fi
         ;;
       apt:repo)
@@ -738,8 +738,7 @@ _apply_sources() {
           log_info "[dry-run] would ensure apt repo: $repo_line"
         elif pm_available apt; then
           [ -f "$keyring" ] || { sudo mkdir -p "$(dirname "$keyring")"; curl -fsSL "$key_url" | sudo gpg --dearmor -o "$keyring" 2>/dev/null || true; }
-          local list_name
-          list_name="pdrx-$(echo "$repo_line" | md5sum | cut -c1-8).list"
+          local list_name="pdrx-$(echo "$repo_line" | md5sum | cut -c1-8).list"
           [ -f "/etc/apt/sources.list.d/$list_name" ] \
             || echo "$repo_line" | sudo tee "/etc/apt/sources.list.d/$list_name" >/dev/null
         fi
@@ -961,11 +960,7 @@ export_desktop_state() {
       _cp_dir "$HOME/.config/gnome-shell" "$out/"
       _cp_dir "$HOME/.config/gtk-3.0"     "$out/"
       _cp_dir "$HOME/.config/gtk-4.0"     "$out/"
-      # Fix: copy contents of extensions dir, not the dir itself
-      if [ -d "$HOME/.local/share/gnome-shell/extensions" ]; then
-        mkdir -p "$out/gnome-shell-extensions"
-        cp -R "$HOME/.local/share/gnome-shell/extensions/"* "$out/gnome-shell-extensions/" 2>/dev/null || true
-      fi
+      _cp_dir "$HOME/.local/share/gnome-shell/extensions" "$out/gnome-shell-extensions"
       ;;
     kde)
       mkdir -p "$out/.config" "$out/.local"
@@ -1035,10 +1030,10 @@ restore_desktop_state() {
       _cp_dir "$out/gnome-shell" "$HOME/.config/"
       _cp_dir "$out/gtk-3.0"     "$HOME/.config/"
       _cp_dir "$out/gtk-4.0"     "$HOME/.config/"
-      # Fix: copy contents, not the dir itself
       if [ -d "$out/gnome-shell-extensions" ]; then
-        mkdir -p "$HOME/.local/share/gnome-shell/extensions"
-        cp -R "$out/gnome-shell-extensions/"* "$HOME/.local/share/gnome-shell/extensions/" 2>/dev/null || true
+        mkdir -p "$HOME/.local/share/gnome-shell"
+        cp -R "$out/gnome-shell-extensions" \
+          "$HOME/.local/share/gnome-shell/extensions" 2>/dev/null || true
       fi
       ;;
     kde)
@@ -1332,7 +1327,16 @@ run_remove() {
     local re
     re="$(regex_escape "$pkg")"
     local line
-    line=$(grep -E ":${re}(=.*)?$" "$PACKAGES_CONF" 2>/dev/null | head -1)
+    # FIX (1.8.0, CRITICAL): this was a bare `line=$(grep ... | head -1)`.
+    # Under `set -euo pipefail`, when grep matches nothing (exit 1) piped
+    # into head (exit 0), pipefail makes the *pipeline's* exit status 1,
+    # and a failing command substitution in a bare assignment triggers
+    # `set -e` — which silently killed the entire pdrx process with NO
+    # output whenever `pdrx remove <pkg>` was called for a package not
+    # present in packages.conf. Confirmed by direct testing. The `|| true`
+    # neutralizes it; the existing `[ -n "$line" ]` check below already
+    # handles the empty/no-match case correctly.
+    line=$(grep -E ":${re}(=.*)?$" "$PACKAGES_CONF" 2>/dev/null | head -1 || true)
     if [ -n "$line" ]; then
       local pm="${line%%:*}"
       if [ "${DRY_RUN:-false}" = "true" ]; then
@@ -1600,8 +1604,18 @@ run_apply() {
         if [ "${DRY_RUN:-false}" = "true" ]; then
           log_info "[dry-run] would deploy dotfile: $rel"
         else
-          cp "$src" "$dest"
-          log_info "Deployed dotfile: $rel"
+          # FIX (1.8.0): the steady state after `pdrx track` is that $dest
+          # is already a symlink pointing at $src. Blindly `cp`-ing into it
+          # made cp fail with "are the same file" every single apply run.
+          # Mirror track's own mechanism (symlink) and only touch $dest
+          # when it isn't already correctly linked.
+          if [ -L "$dest" ] && [ "$(readlink -f "$dest" 2>/dev/null)" = "$(readlink -f "$src" 2>/dev/null)" ]; then
+            log_debug "Dotfile already deployed: $rel"
+          else
+            rm -f "$dest" 2>/dev/null || true
+            ln -sf "$src" "$dest" 2>/dev/null || cp "$src" "$dest"
+            log_info "Deployed dotfile: $rel"
+          fi
         fi
       fi
     done < "$TRACKED_DOTFILES"
@@ -1610,7 +1624,7 @@ run_apply() {
   run_restore_desktop 2>/dev/null || true
   run_apply_systemd 2>/dev/null || true
   run_apply_hooks
-  log_action "apply" "" "" "ok" "${PARALLEL:+parallel}"
+  log_action "apply" "" "" "ok" "$([ "$PARALLEL" = "true" ] && echo parallel || echo sequential)"
 }
 
 _run_apply_sequential() {
@@ -1776,37 +1790,8 @@ run_track() {
   local f
   for f in "$@"; do
     local abs
-    # Path resolution priority:
-    # 1. If absolute path (starts with /), use it
-    # 2. If exists in current directory, use relative to PWD (for shell glob like *)
-    # 3. Otherwise, resolve relative to $HOME
-    if [[ "$f" == /* ]]; then
-      abs="$f"
-    elif [ -e "$PWD/$f" ]; then
-      abs="$PWD/$f"
-    else
-      abs="$HOME/$f"
-    fi
-
-    # Handle directory tracking
-    if [ -d "$abs" ]; then
-      log_info "Tracking directory: $abs"
-      local tracked_count=0
-      # Find all files in the directory (recursively), excluding symlinks that point into DOTFILES_DIR
-      while IFS= read -r -d '' file_in_dir; do
-        local rel="${file_in_dir#"$HOME"/}"
-        local dest="$DOTFILES_DIR/$rel"
-        mkdir -p "$(dirname "$dest")"
-        cp "$file_in_dir" "$dest"
-        grep -qFx "$rel" "$TRACKED_DOTFILES" 2>/dev/null || echo "$rel" >> "$TRACKED_DOTFILES"
-        ln -sf "$dest" "$file_in_dir" 2>/dev/null || true
-        tracked_count=$((tracked_count + 1))
-      done < <(find "$abs" -type f -print0 2>/dev/null)
-      log_success "Tracked $tracked_count files from directory"
-      continue
-    fi
-
-    # Handle single file tracking (original behavior)
+    abs=$(cd "$(dirname "$f")" 2>/dev/null && pwd)/$(basename "$f")
+    [ -f "$abs" ] || abs="$HOME/$f"
     if [ ! -f "$abs" ]; then
       log_error "File not found: $f"
       continue
@@ -1825,69 +1810,65 @@ run_untrack() {
   require_initialized
   local f
   for f in "$@"; do
-    local abs
-    # Path resolution priority:
-    # 1. If absolute path (starts with /), use it
-    # 2. If exists in current directory, use relative to PWD (for shell glob like *)
-    # 3. Otherwise, resolve relative to $HOME
-    if [[ "$f" == /* ]]; then
-      abs="$f"
-    elif [ -e "$PWD/$f" ]; then
-      abs="$PWD/$f"
-    else
-      abs="$HOME/$f"
-    fi
+    local rel
+    # Resolve to a path relative to $HOME, using the same convention
+    # tracked-dotfiles stores paths in (mirrors run_track's resolution):
+    #   - absolute path under $HOME -> strip the $HOME/ prefix
+    #   - absolute path elsewhere   -> not something pdrx can track; skip
+    #   - anything else (bare relative, e.g. ".bashrc" or ".config/x/y")
+    #     -> used as-is, exactly as stored in tracked-dotfiles
+    case "$f" in
+      "$HOME"/*) rel="${f#"$HOME"/}" ;;
+      /*)
+        log_warning "Skipping $f: absolute path outside \$HOME is not tracked by pdrx"
+        continue
+        ;;
+      *) rel="$f" ;;
+    esac
 
-    # Handle directory untracking
-    if [ -d "$abs" ]; then
-      log_info "Untracking directory: $abs"
-      local rel="${abs#"$HOME"/}"
-      [[ "$rel" == "$abs" ]] && rel="$f"
-
-      # CRITICAL: Restore all tracked files from DOTFILES_DIR back to their original locations
-      # before removing the symlinked directory. This prevents data loss.
-      if [ -d "$DOTFILES_DIR/$rel" ]; then
-        while IFS= read -r -d '' tracked_file; do
-          # Calculate the relative path within the tracked directory
-          local file_rel="${tracked_file#$DOTFILES_DIR/$rel/}"
-          local original_path="$abs/$file_rel"
-
-          # Remove the symlink and restore the actual file content
-          if [ -L "$original_path" ]; then
-            rm -f "$original_path"
-            cp "$tracked_file" "$original_path"
-          fi
-        done < <(find "$DOTFILES_DIR/$rel" -type f -print0 2>/dev/null)
-      fi
-
-      if [ -f "$TRACKED_DOTFILES" ]; then
-        local tmp
-        tmp=$(mktemp "${TRACKED_DOTFILES}.XXXXXX")
-        # Remove all entries that start with this directory path
-        grep -v "^${rel}/" "$TRACKED_DOTFILES" > "$tmp" || true
-        mv "$tmp" "$TRACKED_DOTFILES"
-      fi
-
-      # Remove tracked files from DOTFILES_DIR
-      local dest="$DOTFILES_DIR/$rel"
-      [ -d "$dest" ] && rm -rf "$dest"
-      log_success "Untracked directory $rel (files restored)"
+    if [ -f "$TRACKED_DOTFILES" ] && ! grep -qFx "$rel" "$TRACKED_DOTFILES" 2>/dev/null; then
+      log_warning "$rel is not currently tracked (nothing to do)"
       continue
     fi
 
-    # Handle single file untracking (original behavior)
-    # Compute rel from abs path (not from input f) to handle shell glob from any directory
-    local rel="${abs#"$HOME"/}"
-    [[ "$rel" == "$abs" ]] && rel="$f"
     local dest="$DOTFILES_DIR/$rel"
+    local target="$HOME/$rel"
 
-    # CRITICAL: Restore the file from DOTFILES_DIR back to its original location
-    # before removing the tracked copy. This prevents data loss.
-    if [ -L "$abs" ] && [ -f "$dest" ]; then
-      rm -f "$abs"
-      cp "$dest" "$abs"
-      log_info "Restored: $abs"
+    # FIX (critical, 1.8.0): previously this function deleted the
+    # pdrx-owned copy in $DOTFILES_DIR and never touched $target — since
+    # $target is a symlink pointing at that copy (created by `pdrx track`),
+    # the result was a dangling symlink and the file's content was gone.
+    # Untrack must do the inverse of track: put a REAL file back at the
+    # original location and remove the symlink, before any copies are
+    # deleted.
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+      log_info "[dry-run] would untrack $rel: restore real file to $target, remove symlink, drop pdrx copy"
+      continue
     fi
+
+    if [ -L "$target" ]; then
+      rm -f "$target"
+      if [ -f "$dest" ]; then
+        mkdir -p "$(dirname "$target")"
+        cp "$dest" "$target"
+        log_success "Restored $rel to $target (symlink replaced with real file)"
+      else
+        log_warning "Removed dangling symlink at $rel (pdrx copy was already missing — content could not be restored)"
+      fi
+    elif [ -e "$target" ]; then
+      # Target exists but isn't a pdrx symlink (e.g. user already replaced
+      # it manually) — don't clobber whatever is there now.
+      log_info "$rel at \$HOME is not a pdrx symlink; leaving it as-is"
+    else
+      # Target missing entirely but we still have the pdrx copy: restore it.
+      if [ -f "$dest" ]; then
+        mkdir -p "$(dirname "$target")"
+        cp "$dest" "$target"
+        log_success "Restored $rel to $target (was missing from \$HOME)"
+      fi
+    fi
+
+    [ -f "$dest" ] && rm -f "$dest"
 
     if [ -f "$TRACKED_DOTFILES" ]; then
       local tmp
@@ -1896,166 +1877,9 @@ run_untrack() {
       mv "$tmp" "$TRACKED_DOTFILES"
     fi
 
-    [ -f "$dest" ] && rm -f "$dest"
-    log_success "Untracked $rel (file restored)"
+    log_action "untrack" "" "$rel" "ok"
+    log_success "Untracked $rel"
   done
-}
-
-# =============================================================================
-# SYNC DOTFILES - Auto-discover and track common dotfiles
-# =============================================================================
-
-run_sync_dotfiles() {
-  require_initialized
-  log_header "Sync: auto-discover and track common dotfiles"
-
-  # Common dotfiles to auto-discover
-  local common_dotfiles=(
-    # Shell configs
-    ".bashrc"
-    ".bash_profile"
-    ".bash_login"
-    ".bash_logout"
-    ".zshrc"
-    ".zprofile"
-    ".zshenv"
-    ".zlogin"
-    ".zlogout"
-    ".config/fish/config.fish"
-    ".config/fish/fish_variables"
-    ".config/nushell/config.nu"
-    ".config/nushell/env.nu"
-    ".config/nushell/history.txt"
-    # Vim/Neovim
-    ".vimrc"
-    ".vim/vimrc"
-    ".config/nvim/init.vim"
-    ".config/nvim/init.lua"
-    ".config/nvim/coc-settings.json"
-    # Tmux
-    ".tmux.conf"
-    ".config/tmux/tmux.conf"
-    # Git
-    ".gitconfig"
-    ".config/git/config"
-    ".config/git/ignore"
-    # SSH
-    ".ssh/config"
-    # Kitty
-    ".config/kitty/kitty.conf"
-    ".config/kitty/theme.conf"
-    # Alacritty
-    ".config/alacritty/alacritty.yml"
-    ".config/alacritty/alacritty.toml"
-    # WezTerm
-    ".config/wezterm/wezterm.lua"
-    ".wezterm.lua"
-    # VS Code
-    ".config/Code/User/settings.json"
-    ".config/Code/User/keybindings.json"
-    # Helix
-    ".config/helix/config.toml"
-    # Emacs
-    ".emacs"
-    ".emacs.d/init.el"
-    ".config/emacs/init.el"
-    # Starship
-    ".config/starship.toml"
-    # Direnv
-    ".config/direnv/direnvrc"
-    # ASDF
-    ".tool-versions"
-    # Nix
-    ".config/nix/nix.conf"
-    ".config/nixpkgs/config.nix"
-    # GPG
-    ".gnupg/gpg.conf"
-    ".gnupg/gpg-agent.conf"
-    # Curl/Wget
-    ".curlrc"
-    ".wgetrc"
-    # Less
-    ".lesskey"
-    # Inputrc
-    ".inputrc"
-    # Editorconfig
-    ".editorconfig"
-    # Wgetrc
-    ".wgetrc"
-    # X11/Wayland
-    ".Xresources"
-    ".Xmodmap"
-    ".xinitrc"
-    ".config/user-dirs.dirs"
-    # Misc
-    ".profile"
-    ".hushlogin"
-  )
-
-  local found=0
-  local tracked=0
-  local skipped=0
-
-  for file in "${common_dotfiles[@]}"; do
-    local path="$HOME/$file"
-    if [ -f "$path" ]; then
-      found=$((found + 1))
-      local rel="$file"
-      
-      # Check if already tracked
-      if [ -f "$TRACKED_DOTFILES" ] && grep -qFx "$rel" "$TRACKED_DOTFILES" 2>/dev/null; then
-        log_info "Already tracked: $rel"
-        skipped=$((skipped + 1))
-        continue
-      fi
-
-      # Track it
-      local dest="$DOTFILES_DIR/$rel"
-      mkdir -p "$(dirname "$dest")"
-      cp "$path" "$dest"
-      grep -qFx "$rel" "$TRACKED_DOTFILES" 2>/dev/null || echo "$rel" >> "$TRACKED_DOTFILES"
-      ln -sf "$dest" "$path" 2>/dev/null || true
-      log_success "Tracked: $rel"
-      tracked=$((tracked + 1))
-    fi
-  done
-
-  # Also check .config directories that are commonly tracked
-  local common_configs=(
-    "nvim"
-    "kitty"
-    "tmux"
-    "fish"
-    "nushell"
-    "alacritty"
-    "wezterm"
-    "helix"
-    "git"
-    "starship"
-    "direnv"
-  )
-
-  for config_dir in "${common_configs[@]}"; do
-    local config_path="$HOME/.config/$config_dir"
-    if [ -d "$config_path" ] && [ ! -L "$config_path" ]; then
-      # Check if any files in this directory are already tracked individually
-      local has_tracked=false
-      if [ -f "$TRACKED_DOTFILES" ]; then
-        while IFS= read -r tracked_file; do
-          if [[ "$tracked_file" == ".config/$config_dir/"* ]]; then
-            has_tracked=true
-            break
-          fi
-        done < "$TRACKED_DOTFILES"
-      fi
-
-      if [ "$has_tracked" = false ] && [ ! -d "$DOTFILES_DIR/.config/$config_dir" ]; then
-        log_info "Found config directory (not auto-tracked, use 'pdrx track ~/.config/$config_dir' to track entire dir): $config_dir"
-      fi
-    fi
-  done
-
-  log_success "Dotfile sync complete: $found found, $tracked newly tracked, $skipped already tracked"
 }
 
 run_backup() {
@@ -2265,14 +2089,11 @@ run_rollback() {
 
 run_export() {
   require_initialized
-  
-  # Check for --ansible flag
   if [ "${1:-}" = "--ansible" ]; then
     shift
     run_export_ansible "$@"
-    return $?
+    return
   fi
-  
   local out="${1:-}"
   if [ -n "$out" ]; then
     tar -czf "$out" -C "$PDRX_HOME" config state 2>/dev/null \
@@ -2284,320 +2105,581 @@ run_export() {
   fi
 }
 
-# Export pdrx configuration to Ansible playbook format
-run_export_ansible() {
-  require_initialized
-  local out_dir="${1:-./ansible-export}"
-  
-  log_header "Export: generating Ansible playbook"
-  
-  # Create output directory structure
-  mkdir -p "$out_dir"
-  mkdir -p "$out_dir/roles/pdrx_packages/tasks"
-  mkdir -p "$out_dir/roles/pdrx_packages/vars"
-  
-  # Get OS info
-  local os_id os_family
-  os_id=$(detect_os_id)
-  os_family=$(detect_os_id_like)
-  
-  # Generate main playbook
-  cat > "$out_dir/site.yml" << EOF
----
-# Ansible Playbook generated by pdrx
-# This playbook installs packages defined in pdrx configuration
+# =============================================================================
+# ANSIBLE EXPORT  (new in 1.7.0)
+# =============================================================================
 #
-# Usage: ansible-playbook -i inventory site.yml
+# `pdrx export --ansible [DIR]` is a ONE-WAY, best-effort snapshot generator.
+# It reads the same packages.conf / sources.conf / systemd.conf / dotfiles /
+# hooks that `pdrx apply` uses, and emits a standalone, runnable Ansible
+# role + playbook from them. It is NOT a runtime dependency of `pdrx apply` —
+# pdrx never shells out to ansible-playbook itself. This exists purely so
+# the declarative state pdrx already maintains can be handed to a teammate
+# or CI system that standardizes on Ansible.
+#
+# Coverage:
+#   apt/dnf/yum/pacman/zypper/brew/flatpak/snap/cargo -> real modules
+#     (pacman/zypper/flatpak/snap/cargo require the community.general
+#     collection — noted in the generated README)
+#   winget -> NOT translated. No reliable public Ansible module exists for
+#     winget as of this writing; emitting a fake task would silently produce
+#     a playbook that fails or does nothing on Windows hosts, which is worse
+#     than being upfront. Emitted as a commented block with the raw package
+#     list, for manual conversion (e.g. chocolatey.chocolatey or a
+#     win_command wrapper the user writes themselves).
+#   sources -> apt_repository/apt_key, get_url into yum.repos.d,
+#     community.general.zypper_repository, community.general.flatpak_remote
+#   systemd -> ansible.builtin.systemd_service
+#   dotfiles -> ansible.builtin.copy, files bundled into the role
+#   hook -> ansible.builtin.script, files bundled into the role
 
-- name: Apply pdrx configuration
-  hosts: all
-  become: yes
-  gather_facts: yes
-  
-  vars:
-    pdrx_os_id: "${os_id}"
-    pdrx_os_family: "${os_family}"
-  
-  roles:
-    - role: pdrx_packages
-      tags: packages
-EOF
-
-  # Generate inventory
-  cat > "$out_dir/inventory" << 'EOF'
-[local]
-localhost ansible_connection=local
-
-[pdrx_hosts]
-localhost
-EOF
-
-  # Generate package tasks
-  _generate_ansible_package_tasks "$out_dir"
-  
-  # Generate variables file
-  _generate_ansible_vars "$out_dir"
-  
-  # Generate README
-  _generate_ansible_readme "$out_dir"
-
-  log_success "Exported Ansible playbook to $out_dir"
-  log_info "Run: cd $out_dir && ansible-playbook -i inventory site.yml"
+_yaml_q() {
+  # Double-quote a scalar for safe YAML embedding: escape backslashes then
+  # double quotes, so package names/URLs with special chars can't break
+  # the generated document.
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
 }
 
-# Generate Ansible tasks for package installation
-_generate_ansible_package_tasks() {
-  local out_dir="$1"
-  local tasks_file="$out_dir/roles/pdrx_packages/tasks/main.yml"
-  
-  cat > "$tasks_file" << 'EOF'
----
-# Package installation tasks generated by pdrx
+_ansible_task_pkg_list() {
+  # Emits: '      - "pkg1"\n      - "pkg2"\n' for a given pm from packages.conf
+  local pm="$1" pinned="$2"  # pinned: "yes" or "no"
+  [ -f "$PACKAGES_CONF" ] || return 0
+  local line
+  while IFS= read -r line; do
+    [[ "$line" == \#* ]] || [ -z "$line" ] && continue
+    [[ "$line" == "$pm:"* ]] || continue
+    local rest="${line#*:}"
+    local name="$rest" version=""
+    if [[ "$rest" == *=* ]]; then
+      name="${rest%%=*}"
+      version="${rest#*=}"
+    fi
+    if [ "$pinned" = "yes" ] && [ -z "$version" ]; then continue; fi
+    if [ "$pinned" = "no" ]  && [ -n "$version" ]; then continue; fi
+    if [ "$pinned" = "yes" ]; then
+      printf '      - name: "%s"\n        version: "%s"\n' "$(_yaml_q "$name")" "$(_yaml_q "$version")"
+    else
+      printf '      - "%s"\n' "$(_yaml_q "$name")"
+    fi
+  done < "$PACKAGES_CONF"
+}
 
-- name: Update package cache (apt)
-  apt:
-    update_cache: yes
-    cache_valid_time: 3600
-  when: ansible_pkg_mgr == "apt"
-  tags: [packages, cache]
+_ansible_pm_has_pkgs() {
+  local pm="$1"
+  [ -f "$PACKAGES_CONF" ] || return 1
+  grep -qE "^${pm}:" "$PACKAGES_CONF" 2>/dev/null
+}
 
-- name: Update package cache (dnf)
-  dnf:
-    update_cache: yes
-  when: ansible_pkg_mgr == "dnf"
-  tags: [packages, cache]
+run_export_ansible() {
+  local outdir="${1:-./pdrx-ansible-export}"
+  outdir="${outdir%/}"
+  local role_dir="$outdir/roles/pdrx_system"
 
-- name: Update package cache (pacman)
-  pacman:
-    update_cache: yes
-  when: ansible_pkg_mgr == "pacman"
-  tags: [packages, cache]
+  mkdir -p "$role_dir/tasks" "$role_dir/files/dotfiles" "$role_dir/files/hooks"
 
-- name: Update package cache (zypper)
-  zypper:
-    refresh: yes
-  when: ansible_pkg_mgr == "zypper"
-  tags: [packages, cache]
+  # ---- bundle dotfiles (preserving relative paths) ----
+  local dotfile_count=0
+  if [ -f "$TRACKED_DOTFILES" ]; then
+    local rel
+    while IFS= read -r rel; do
+      [ -z "$rel" ] && continue
+      local src="$DOTFILES_DIR/$rel"
+      [ -f "$src" ] || continue
+      mkdir -p "$role_dir/files/dotfiles/$(dirname "$rel")"
+      cp "$src" "$role_dir/files/dotfiles/$rel"
+      dotfile_count=$((dotfile_count + 1))
+    done < "$TRACKED_DOTFILES"
+  fi
 
-EOF
+  # ---- bundle post-apply hook ----
+  local have_hook=false
+  if [ -x "$HOOKS_DIR/post-apply.sh" ]; then
+    cp "$HOOKS_DIR/post-apply.sh" "$role_dir/files/hooks/post-apply.sh"
+    have_hook=true
+  fi
 
-  # Parse packages and group by package manager
-  declare -A PM_PACKAGES
-  declare -A PM_VERSIONS
-  
-  if [ -f "$PACKAGES_CONF" ]; then
-    while IFS= read -r line; do
-      [[ "$line" =~ ^#.*$ ]] && continue
-      [ -z "$line" ] && continue
-      
-      local pm pkg version
-      IFS=':' read -r pm rest <<< "$line"
-      pkg="${rest%%=*}"
-      version=""
-      [[ "$rest" == *=* ]] && version="${rest#*=}"
-      
-      [ -z "$pm" ] || [ -z "$pkg" ] && continue
-      
-      # Initialize array if needed
-      if [ -z "${PM_PACKAGES[$pm]:-}" ]; then
-        PM_PACKAGES[$pm]=""
+  # ---- tasks/main.yml ----
+  {
+    echo "---"
+    echo "# Generated by pdrx export --ansible on $(date_iso_seconds)"
+    echo "# Source: $PDRX_CONFIG (packages.conf, sources.conf, systemd.conf, dotfiles, hooks)"
+    echo "# This is a ONE-WAY, point-in-time snapshot. Re-run 'pdrx export --ansible'"
+    echo "# after future 'pdrx sync' calls to refresh it — it is not kept in sync"
+    echo "# automatically."
+    echo ""
+
+    # -- sources (must run before packages) --
+    if [ -f "$SOURCES_CONF" ] && grep -qv '^#\|^$' "$SOURCES_CONF" 2>/dev/null; then
+      echo "# ---------------------------------------------------------------"
+      echo "# Repo / PPA / remote sources (from sources.conf)"
+      echo "# ---------------------------------------------------------------"
+      local line
+      while IFS= read -r line; do
+        [[ "$line" == \#* ]] && continue
+        [ -z "$line" ] && continue
+        local pm="${line%%:*}" rest="${line#*:}"
+        local kind="${rest%%=*}" val="${rest#*=}"
+        case "$pm:$kind" in
+          apt:ppa)
+            cat << YAML
+- name: "Add apt PPA: $(_yaml_q "$val")"
+  ansible.builtin.apt_repository:
+    repo: "$(_yaml_q "$val")"
+    state: present
+  become: true
+  tags: [sources, apt]
+
+YAML
+            ;;
+          apt:repo)
+            local repo_line="${val%%|*}" rem="${val#*|}"
+            local keyring="${rem%%|*}" key_url="${rem#*|}"
+            cat << YAML
+- name: "Fetch apt signing key for: $(_yaml_q "$repo_line")"
+  ansible.builtin.get_url:
+    url: "$(_yaml_q "$key_url")"
+    dest: "/tmp/pdrx-key-$(echo "$repo_line" | md5sum | cut -c1-8).gpg"
+  become: true
+  tags: [sources, apt]
+
+- name: "Dearmor and install apt keyring: $(_yaml_q "$keyring")"
+  ansible.builtin.shell: |
+    gpg --dearmor < /tmp/pdrx-key-$(echo "$repo_line" | md5sum | cut -c1-8).gpg > "$(_yaml_q "$keyring")"
+  args:
+    creates: "$(_yaml_q "$keyring")"
+  become: true
+  tags: [sources, apt]
+
+- name: "Add apt repo line: $(_yaml_q "$repo_line")"
+  ansible.builtin.apt_repository:
+    repo: "$(_yaml_q "$repo_line")"
+    filename: "pdrx-$(echo "$repo_line" | md5sum | cut -c1-8)"
+    state: present
+  become: true
+  tags: [sources, apt]
+
+YAML
+            ;;
+          dnf:repo)
+            cat << YAML
+- name: "Add dnf repo: $(_yaml_q "$val")"
+  ansible.builtin.get_url:
+    url: "$(_yaml_q "$val")"
+    dest: "/etc/yum.repos.d/pdrx-$(echo "$val" | md5sum | cut -c1-8).repo"
+  become: true
+  tags: [sources, dnf]
+
+YAML
+            ;;
+          zypper:repo)
+            cat << YAML
+- name: "Add zypper repo: $(_yaml_q "$val")"
+  community.general.zypper_repository:
+    repo: "$(_yaml_q "$val")"
+    state: present
+    auto_import_keys: true
+  become: true
+  tags: [sources, zypper]
+
+YAML
+            ;;
+          flatpak:remote)
+            local name="${val%%|*}" url="${val#*|}"
+            cat << YAML
+- name: "Add flatpak remote: $(_yaml_q "$name")"
+  community.general.flatpak_remote:
+    name: "$(_yaml_q "$name")"
+    flatpakrepo_url: "$(_yaml_q "$url")"
+    state: present
+  become: true
+  tags: [sources, flatpak]
+
+YAML
+            ;;
+          *) ;;
+        esac
+      done < "$SOURCES_CONF"
+    fi
+
+    # -- packages, one task block per PM --
+    echo "# ---------------------------------------------------------------"
+    echo "# Packages (from packages.conf)"
+    echo "# ---------------------------------------------------------------"
+
+    if _ansible_pm_has_pkgs apt; then
+      local unpinned pinned
+      unpinned=$(_ansible_task_pkg_list apt no)
+      if [ -n "$unpinned" ]; then
+        cat << YAML
+- name: "Install apt packages (unpinned)"
+  ansible.builtin.apt:
+    name:
+$unpinned
+    state: present
+    update_cache: true
+  become: true
+  tags: [packages, apt]
+
+YAML
       fi
-      
-      PM_PACKAGES[$pm]="${PM_PACKAGES[$pm]:-}${PM_PACKAGES[$pm]:+,}$pkg"
-      if [ -n "$version" ]; then
-        PM_VERSIONS["$pm:$pkg"]="$version"
+      pinned=$(_ansible_task_pkg_list apt yes)
+      if [ -n "$pinned" ]; then
+        cat << YAML
+- name: "Install pinned apt packages"
+  ansible.builtin.apt:
+    name: "{{ item.name }}={{ item.version }}"
+    state: present
+  loop:
+$pinned
+  become: true
+  tags: [packages, apt]
+
+YAML
       fi
-    done < "$PACKAGES_CONF"
-    
-    # Generate tasks for each package manager
-    for pm in apt dnf pacman zypper flatpak snap cargo; do
-      local pkgs="${PM_PACKAGES[$pm]:-}"
-      [ -z "$pkgs" ] && continue
-      
-      # Skip if no packages for this PM
-      [ -z "${PM_PACKAGES[$pm]:-}" ] && continue
-      
-      IFS=',' read -ra PKG_LIST <<< "${PM_PACKAGES[$pm]}"
-      
-      case "$pm" in
-        apt)
-          cat >> "$tasks_file" << EOF
-- name: Install apt packages
-  apt:
-    name: "{{ item }}"
-    state: present
-  loop:
-$(printf '    - "%s"\n' "${PKG_LIST[@]}")
-  when: ansible_pkg_mgr == "apt"
-  tags: packages
+    fi
 
-EOF
-          ;;
-        dnf|yum)
-          cat >> "$tasks_file" << EOF
-- name: Install dnf packages
-  dnf:
-    name: "{{ item }}"
+    if _ansible_pm_has_pkgs dnf; then
+      local unpinned pinned
+      unpinned=$(_ansible_task_pkg_list dnf no)
+      if [ -n "$unpinned" ]; then
+        cat << YAML
+- name: "Install dnf packages (unpinned)"
+  ansible.builtin.dnf:
+    name:
+$unpinned
     state: present
-  loop:
-$(printf '    - "%s"\n' "${PKG_LIST[@]}")
-  when: ansible_pkg_mgr == "dnf"
-  tags: packages
+  become: true
+  tags: [packages, dnf]
 
-EOF
-          ;;
-        pacman)
-          cat >> "$tasks_file" << EOF
-- name: Install pacman packages
-  pacman:
-    name: "{{ item }}"
+YAML
+      fi
+      pinned=$(_ansible_task_pkg_list dnf yes)
+      if [ -n "$pinned" ]; then
+        cat << YAML
+- name: "Install pinned dnf packages"
+  ansible.builtin.dnf:
+    name: "{{ item.name }}-{{ item.version }}"
     state: present
   loop:
-$(printf '    - "%s"\n' "${PKG_LIST[@]}")
-  when: ansible_pkg_mgr == "pacman"
-  tags: packages
+$pinned
+  become: true
+  tags: [packages, dnf]
 
-EOF
-          ;;
-        zypper)
-          cat >> "$tasks_file" << EOF
-- name: Install zypper packages
-  zypper:
-    name: "{{ item }}"
-    state: present
-  loop:
-$(printf '    - "%s"\n' "${PKG_LIST[@]}")
-  when: ansible_pkg_mgr == "zypper"
-  tags: packages
+YAML
+      fi
+    fi
 
-EOF
-          ;;
-        flatpak)
-          cat >> "$tasks_file" << EOF
-- name: Install flatpak packages
-  flatpak:
-    name: "{{ item }}"
+    if _ansible_pm_has_pkgs yum; then
+      local unpinned
+      unpinned=$(_ansible_task_pkg_list yum no)
+      if [ -n "$unpinned" ]; then
+        cat << YAML
+- name: "Install yum packages"
+  ansible.builtin.yum:
+    name:
+$unpinned
     state: present
-  loop:
-$(printf '    - "%s"\n' "${PKG_LIST[@]}")
+  become: true
+  tags: [packages, yum]
+
+YAML
+      fi
+    fi
+
+    if _ansible_pm_has_pkgs pacman; then
+      local unpinned
+      unpinned=$(_ansible_task_pkg_list pacman no)
+      if [ -n "$unpinned" ]; then
+        cat << YAML
+- name: "Install pacman packages"
+  community.general.pacman:
+    name:
+$unpinned
+    state: present
+  become: true
+  tags: [packages, pacman]
+  # NOTE: pacman version pinning is not supported by pdrx or this module;
+  # any pinned pacman entries in packages.conf were skipped (there should
+  # be none — pdrx warns at install time when pinning is unsupported).
+
+YAML
+      fi
+    fi
+
+    if _ansible_pm_has_pkgs zypper; then
+      local unpinned
+      unpinned=$(_ansible_task_pkg_list zypper no)
+      if [ -n "$unpinned" ]; then
+        cat << YAML
+- name: "Install zypper packages"
+  community.general.zypper:
+    name:
+$unpinned
+    state: present
+  become: true
+  tags: [packages, zypper]
+
+YAML
+      fi
+    fi
+
+    if _ansible_pm_has_pkgs brew; then
+      local unpinned
+      unpinned=$(_ansible_task_pkg_list brew no)
+      if [ -n "$unpinned" ]; then
+        cat << YAML
+- name: "Install homebrew packages"
+  community.general.homebrew:
+    name:
+$unpinned
+    state: present
+  tags: [packages, brew]
+
+YAML
+      fi
+    fi
+
+    if _ansible_pm_has_pkgs flatpak; then
+      local unpinned
+      unpinned=$(_ansible_task_pkg_list flatpak no)
+      if [ -n "$unpinned" ]; then
+        cat << YAML
+- name: "Install flatpak packages"
+  community.general.flatpak:
+    name:
+$unpinned
+    state: present
   tags: [packages, flatpak]
 
-EOF
-          ;;
-        snap)
-          cat >> "$tasks_file" << EOF
-- name: Install snap packages
-  snap:
-    name: "{{ item }}"
+YAML
+      fi
+    fi
+
+    if _ansible_pm_has_pkgs snap; then
+      local unpinned
+      unpinned=$(_ansible_task_pkg_list snap no)
+      if [ -n "$unpinned" ]; then
+        cat << YAML
+- name: "Install snap packages"
+  community.general.snap:
+    name:
+$unpinned
     state: present
-  loop:
-$(printf '    - "%s"\n' "${PKG_LIST[@]}")
+  become: true
   tags: [packages, snap]
 
-EOF
-          ;;
-        cargo)
-          cat >> "$tasks_file" << EOF
-- name: Check if cargo is installed
-  command: which cargo
-  register: cargo_check
-  changed_when: false
-  failed_when: false
+YAML
+      fi
+    fi
+
+    if _ansible_pm_has_pkgs cargo; then
+      local unpinned pinned
+      unpinned=$(_ansible_task_pkg_list cargo no)
+      if [ -n "$unpinned" ]; then
+        cat << YAML
+- name: "Install cargo packages (unpinned)"
+  community.general.cargo:
+    name:
+$unpinned
+    state: present
   tags: [packages, cargo]
 
-- name: Install cargo packages
-  command: "cargo install {{ item }}"
-  args:
-    creates: "~/.cargo/bin/{{ item }}"
+YAML
+      fi
+      pinned=$(_ansible_task_pkg_list cargo yes)
+      if [ -n "$pinned" ]; then
+        cat << YAML
+- name: "Install pinned cargo packages"
+  community.general.cargo:
+    name: "{{ item.name }}"
+    version: "{{ item.version }}"
+    state: present
   loop:
-$(printf '    - "%s"\n' "${PKG_LIST[@]}")
-  when: cargo_check.rc == 0
+$pinned
   tags: [packages, cargo]
 
-EOF
-          ;;
-      esac
-    done
+YAML
+      fi
+    fi
+
+    if _ansible_pm_has_pkgs winget; then
+      echo "# ---------------------------------------------------------------"
+      echo "# winget packages: NOT auto-translated (no reliable public"
+      echo "# Ansible winget module exists as of this writing). Raw entries"
+      echo "# from packages.conf, for manual conversion:"
+      echo "# ---------------------------------------------------------------"
+      local line
+      while IFS= read -r line; do
+        [[ "$line" == "winget:"* ]] || continue
+        echo "#   ${line#winget:}"
+      done < "$PACKAGES_CONF"
+      echo ""
+    fi
+
+    # -- systemd units --
+    if [ -f "$SYSTEMD_CONF" ] && grep -qv '^#\|^$' "$SYSTEMD_CONF" 2>/dev/null; then
+      echo "# ---------------------------------------------------------------"
+      echo "# systemd units (from systemd.conf)"
+      echo "# ---------------------------------------------------------------"
+      local line
+      while IFS= read -r line; do
+        [[ "$line" == \#* ]] && continue
+        [ -z "$line" ] && continue
+        local scope="${line%%:*}" unit="${line#*:}"
+        [ -z "$unit" ] && continue
+        if [ "$scope" = "system" ]; then
+          cat << YAML
+- name: "Enable systemd unit (system): $(_yaml_q "$unit")"
+  ansible.builtin.systemd_service:
+    name: "$(_yaml_q "$unit")"
+    enabled: true
+  become: true
+  tags: [systemd]
+
+YAML
+        else
+          cat << YAML
+- name: "Enable systemd unit (user): $(_yaml_q "$unit")"
+  ansible.builtin.systemd_service:
+    name: "$(_yaml_q "$unit")"
+    scope: user
+    enabled: true
+  tags: [systemd]
+
+YAML
+        fi
+      done < "$SYSTEMD_CONF"
+    fi
+
+    # -- dotfiles --
+    if [ "$dotfile_count" -gt 0 ]; then
+      echo "# ---------------------------------------------------------------"
+      echo "# Dotfiles ($dotfile_count tracked file(s))"
+      echo "# ---------------------------------------------------------------"
+      local rel
+      while IFS= read -r rel; do
+        [ -z "$rel" ] && continue
+        [ -f "$role_dir/files/dotfiles/$rel" ] || continue
+        cat << YAML
+- name: "Deploy dotfile: $(_yaml_q "$rel")"
+  ansible.builtin.copy:
+    src: "dotfiles/$rel"
+    dest: "{{ ansible_env.HOME }}/$rel"
+    mode: preserve
+  tags: [dotfiles]
+
+YAML
+      done < "$TRACKED_DOTFILES"
+    fi
+
+    # -- post-apply hook --
+    if [ "$have_hook" = "true" ]; then
+      cat << 'YAML'
+# ---------------------------------------------------------------
+# post-apply hook (from ~/.pdrx/config/hooks/post-apply.sh)
+# ---------------------------------------------------------------
+- name: "Run pdrx post-apply hook"
+  ansible.builtin.script: "hooks/post-apply.sh"
+  tags: [hooks]
+
+YAML
+    fi
+  } > "$role_dir/tasks/main.yml.body"
+
+  # FIX: a tasks/main.yml with only comments (nothing declared yet in pdrx)
+  # parses as YAML null, which Ansible rejects — "tasks must be a list".
+  # Force an explicit empty list so the export is always a valid,
+  # runnable (if no-op) role.
+  if ! grep -q '^- name:' "$role_dir/tasks/main.yml.body"; then
+    echo "# Nothing declared in pdrx yet (no packages/sources/systemd/dotfiles/hook)." \
+      >> "$role_dir/tasks/main.yml.body"
+    echo "[]" >> "$role_dir/tasks/main.yml.body"
   fi
-  
-  # Add final marker
-  cat >> "$tasks_file" << 'EOF'
-- name: Package installation complete
-  debug:
-    msg: "All packages installed successfully"
-  tags: packages
-EOF
-}
+  mv "$role_dir/tasks/main.yml.body" "$role_dir/tasks/main.yml"
 
-# Generate Ansible variables file
-_generate_ansible_vars() {
-  local out_dir="$1"
-  local vars_file="$out_dir/roles/pdrx_packages/vars/main.yml"
-  
-  cat > "$vars_file" << EOF
+  # ---- playbook.yml ----
+  cat > "$outdir/playbook.yml" << YAML
 ---
-# Variables generated by pdrx
-# Export timestamp: $(date -Iseconds)
-# Source OS: $(detect_os_id)
+- name: Reproduce system state exported from pdrx
+  hosts: all
+  roles:
+    - pdrx_system
+YAML
 
-pdrx_export:
-  timestamp: "$(date -Iseconds)"
-  source_os: "$(detect_os_id)"
-  source_version: "$VERSION"
+  # ---- inventory.ini ----
+  cat > "$outdir/inventory.ini" << 'YAML'
+# Edit this to target the real host(s) you want to apply this to.
+# Defaults to localhost for a quick smoke test:
+#   ansible-playbook -i inventory.ini playbook.yml --check
+[all]
+localhost ansible_connection=local
+YAML
 
-pdrx_config_dir: "${PDRX_HOME}"
-EOF
-}
+  # ---- README ----
+  local needs_community_general=false
+  for pm in pacman zypper flatpak snap cargo; do
+    _ansible_pm_has_pkgs "$pm" && needs_community_general=true
+  done
+  if [ -f "$SOURCES_CONF" ] && grep -qE '^zypper:|^flatpak:' "$SOURCES_CONF" 2>/dev/null; then
+    needs_community_general=true
+  fi
 
-# Generate README for the Ansible export
-_generate_ansible_readme() {
-  local out_dir="$1"
-  
-  cat > "$out_dir/README.md" << EOF
-# pdrx Ansible Export
+  cat > "$outdir/README.md" << EOF
+# pdrx Ansible export
 
-This directory contains an Ansible playbook generated by pdrx.
-
-## Files
-
-- **site.yml**: Main playbook that applies all configurations
-- **inventory**: Inventory file with localhost
-- **roles/pdrx_packages/**: Role for package installation
-  - tasks/main.yml: Package installation tasks
-  - vars/main.yml: Variables and package lists
-
-## Usage
-
-### Basic Usage
-
-\`\`\`bash
-ansible-playbook -i inventory site.yml
-\`\`\`
-
-### Check Mode (Dry Run)
-
-\`\`\`bash
-ansible-playbook -i inventory site.yml --check
-\`\`\`
-
-### Limit to Specific Hosts
-
-\`\`\`bash
-ansible-playbook -i inventory site.yml --limit localhost
-\`\`\`
+Generated by \`pdrx export --ansible\` on $(date_iso_seconds) from
+\`$PDRX_CONFIG\`. **This is a one-way, point-in-time snapshot** — it is not
+kept in sync automatically. Re-run the export after future \`pdrx sync\`
+calls if you want it refreshed.
 
 ## Requirements
 
-- Ansible 2.9+ or ansible-core
-- Target system with supported package manager
+\`\`\`
+pip install --user ansible-core
+$( [ "$needs_community_general" = "true" ] && echo "ansible-galaxy collection install community.general" )
+\`\`\`
 
-## Notes
+## Usage
 
-- This playbook requires Ansible 2.9+ (or ansible-core)
-- Some packages may not be available in all distributions
-- Version pinning is supported where the package manager supports it
-- Generated by pdrx v${VERSION} on $(date -Iseconds)
+\`\`\`
+# Dry run against localhost first:
+ansible-playbook -i inventory.ini playbook.yml --check --diff
+
+# Edit inventory.ini to point at your real target host(s), then:
+ansible-playbook -i inventory.ini playbook.yml --ask-become-pass
+\`\`\`
+
+Tasks are tagged so you can apply a subset, e.g.:
+
+\`\`\`
+ansible-playbook -i inventory.ini playbook.yml --tags packages,systemd
+\`\`\`
+
+## Known gaps vs. \`pdrx apply\`
+
+- **winget packages are not translated.** No reliable public Ansible module
+  exists for winget. Raw package names are left as comments in
+  \`roles/pdrx_system/tasks/main.yml\` for manual conversion.
+- **pacman package pinning** isn't supported by pdrx itself, so there is
+  nothing to translate here either — all pacman entries are unpinned by
+  construction.
+- **apt/dnf pinned versions** are translated using each module's
+  \`name=version\` / \`name-version\` syntax; verify the exact version string
+  is still resolvable in your target's repos before a real run — pinned
+  versions age out of repos over time on rolling package indices.
+- Task order matches pdrx's own \`apply\` order (sources → packages →
+  systemd → dotfiles → hook), but Ansible's own idempotency checks per
+  module are what actually govern re-run safety, not pdrx's.
 EOF
+
+  # ---- tarball for convenience ----
+  local tarball="${outdir}.tar.gz"
+  tar -czf "$tarball" -C "$(dirname "$outdir")" "$(basename "$outdir")" 2>/dev/null || true
+
+  log_success "Ansible export written to $outdir/ (also packaged as $tarball)"
+  log_info "Packages: apt=$(_ansible_pm_has_pkgs apt && echo yes || echo no), dnf=$(_ansible_pm_has_pkgs dnf && echo yes || echo no), pacman=$(_ansible_pm_has_pkgs pacman && echo yes || echo no)"
+  [ "$needs_community_general" = "true" ] && log_info "Requires the community.general collection — see README.md"
+  _ansible_pm_has_pkgs winget && log_warning "winget packages were NOT translated — see README.md"
 }
 
 run_import() {
@@ -2740,7 +2822,12 @@ run_self_update() {
   rel_json=$(_fetch_url "$api_url") || { log_error "Failed to query latest release"; exit 1; }
 
   local tag
-  tag=$(printf '%s' "$rel_json" | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+  # FIX (1.8.0): same bare-assignment pipefail trap as the `remove` fix
+  # above — if the API response doesn't contain "tag_name" (malformed
+  # response, rate limit, etc.), grep -m1 exits 1 and would silently kill
+  # the whole self-update with no error message. || true neutralizes it;
+  # the existing [ -z "$tag" ] check below still catches the real failure.
+  tag=$(printf '%s' "$rel_json" | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' || true)
   [ -z "$tag" ] && { log_error "Could not determine latest release tag"; exit 1; }
 
   local remote_version="${tag#v}"
@@ -2841,7 +2928,6 @@ ${BOLD}COMMANDS:${NC}
   source list                     List declared sources
   source apply                    Re-apply all declared sources (also runs at start of 'apply')
   sync                            Sync packages, sources refs, systemd units, and desktop into config
-  sync-dotfiles                   Auto-discover and track common dotfiles (.bashrc, .zshrc, .config/nvim, etc.)
   apply [--parallel]              Apply full declarative config (sources → packages → dotfiles → DE → units → hook)
   track FILE                      Track dotfile (copy + symlink)
   untrack FILE                    Untrack dotfile
@@ -2858,7 +2944,7 @@ ${BOLD}COMMANDS:${NC}
   upgrade                         Upgrade all packages via each PM
   self-update                     Update pdrx itself (checksum-verified, pinned to latest release)
   export [FILE]                   Export config as tarball
-  export --ansible [DIR]            Export config as Ansible playbook
+  export --ansible [DIR]          One-way export as a runnable Ansible role + playbook
   import FILE                     Import config from tarball
   destroy                         Restore dotfiles and remove pdrx (-y skips prompt)
 
@@ -2870,8 +2956,6 @@ ${BOLD}DECLARATIVE FORMAT (packages.conf):${NC}
   pm:package=version      pinned version (written by install --pin)
 
 ${BOLD}EXAMPLES:${NC}
-  pdrx init                                   # initialize pdrx
-  pdrx sync-dotfiles                          # auto-discover and track common dotfiles
   pdrx install vim                            # interactive PM selection
   pdrx install --pm apt vim                   # install via apt
   pdrx install --pm cargo rg --pin            # install and pin current version
@@ -2957,7 +3041,6 @@ case "$CMD" in
   apply)       run_apply "$@" ;;
   track)       run_track "$@" ;;
   untrack)     run_untrack "$@" ;;
-  sync-dotfiles) run_sync_dotfiles "$@" ;;
   hook)
     if [ "${1:-}" = "edit" ]; then
       run_hook_edit
