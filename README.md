@@ -15,7 +15,7 @@
 <!-- Dynamic Badges -->
 <p align="center">
   <a href="https://github.com/stefan-hacks/pdrx/releases">
-    <img src="https://img.shields.io/badge/v1.8.1-2ea043?style=for-the-badge&logo=semver&logoColor=white&label=version" alt="version" />
+    <img src="https://img.shields.io/badge/v1.8.5-2ea043?style=for-the-badge&logo=semver&logoColor=white&label=version" alt="version" />
   </a>
   <a href="#features">
     <img src="https://img.shields.io/badge/Ansible%20Export-EE0000?style=for-the-badge&logo=ansible&logoColor=white" alt="ansible" />
@@ -48,7 +48,16 @@
 
 ---
 
-## ✨ What's New in v1.8.1 - CURRENTLY WORKING ON UNTRACK features restore WILL UPDATE ONCE ready
+## ✨ What's New in v1.8.5 — Thanks to @waldyrious
+
+### Changelog
+
+| Version | Changes |
+|---------|---------|
+| **v1.8.5** | Restored `sync-dotfiles` command that was accidentally removed |
+| **v1.8.4** | Fixed directory `untrack` to only affect files within the specified directory |
+| **v1.8.3** | Re-implemented directory tracking and `untrack` commands |
+| **v1.8.2** | 5 critical bug fixes: `untrack` restoration, pipefail handling, `apply` symlink conflicts, `pm_available` checks, audit log parallel flag |
 
 ### 🐛 **Critical Bug Fixes** — Thanks to @waldyrious
 
