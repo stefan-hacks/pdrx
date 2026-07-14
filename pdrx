@@ -16,7 +16,7 @@
 
 set -euo pipefail
 
-VERSION="1.8.4"
+VERSION="1.8.5"
 
 # =============================================================================
 # PORTABLE HELPERS
@@ -1785,6 +1785,159 @@ run_restore_desktop() {
   log_success "Restored desktop state from $DESKTOP_EXPORT"
 }
 
+run_sync_dotfiles() {
+  require_initialized
+  log_header "Sync: auto-discover and track common dotfiles"
+
+  # Common dotfiles to auto-discover
+  local common_dotfiles=(
+    # Shell configs
+    ".bashrc"
+    ".bash_profile"
+    ".bash_login"
+    ".bash_logout"
+    ".zshrc"
+    ".zprofile"
+    ".zshenv"
+    ".zlogin"
+    ".zlogout"
+    ".config/fish/config.fish"
+    ".config/fish/fish_variables"
+    ".config/nushell/config.nu"
+    ".config/nushell/env.nu"
+    ".config/nushell/history.txt"
+    # Vim/Neovim
+    ".vimrc"
+    ".vim/vimrc"
+    ".config/nvim/init.vim"
+    ".config/nvim/init.lua"
+    ".config/nvim/coc-settings.json"
+    # Tmux
+    ".tmux.conf"
+    ".config/tmux/tmux.conf"
+    # Git
+    ".gitconfig"
+    ".config/git/config"
+    ".config/git/ignore"
+    # SSH
+    ".ssh/config"
+    # Kitty
+    ".config/kitty/kitty.conf"
+    ".config/kitty/theme.conf"
+    # Alacritty
+    ".config/alacritty/alacritty.yml"
+    ".config/alacritty/alacritty.toml"
+    # WezTerm
+    ".config/wezterm/wezterm.lua"
+    ".wezterm.lua"
+    # VS Code
+    ".config/Code/User/settings.json"
+    ".config/Code/User/keybindings.json"
+    # Helix
+    ".config/helix/config.toml"
+    # Emacs
+    ".emacs"
+    ".emacs.d/init.el"
+    ".config/emacs/init.el"
+    # Starship
+    ".config/starship.toml"
+    # Direnv
+    ".config/direnv/direnvrc"
+    # ASDF
+    ".tool-versions"
+    # Nix
+    ".config/nix/nix.conf"
+    ".config/nixpkgs/config.nix"
+    # GPG
+    ".gnupg/gpg.conf"
+    ".gnupg/gpg-agent.conf"
+    # Curl/Wget
+    ".curlrc"
+    ".wgetrc"
+    # Less
+    ".lesskey"
+    # Inputrc
+    ".inputrc"
+    # Editorconfig
+    ".editorconfig"
+    # Wgetrc
+    ".wgetrc"
+    # X11/Wayland
+    ".Xresources"
+    ".Xmodmap"
+    ".xinitrc"
+    ".config/user-dirs.dirs"
+    # Misc
+    ".profile"
+    ".hushlogin"
+  )
+
+  local found=0
+  local tracked=0
+  local skipped=0
+
+  for file in "${common_dotfiles[@]}"; do
+    local path="$HOME/$file"
+    if [ -f "$path" ]; then
+      found=$((found + 1))
+      local rel="$file"
+      
+      # Check if already tracked
+      if [ -f "$TRACKED_DOTFILES" ] && grep -qFx "$rel" "$TRACKED_DOTFILES" 2>/dev/null; then
+        log_info "Already tracked: $rel"
+        skipped=$((skipped + 1))
+        continue
+      fi
+
+      # Track it
+      local dest="$DOTFILES_DIR/$rel"
+      mkdir -p "$(dirname "$dest")"
+      cp "$path" "$dest"
+      grep -qFx "$rel" "$TRACKED_DOTFILES" 2>/dev/null || echo "$rel" >> "$TRACKED_DOTFILES"
+      ln -sf "$dest" "$path" 2>/dev/null || true
+      log_success "Tracked: $rel"
+      tracked=$((tracked + 1))
+    fi
+  done
+
+  # Also check .config directories that are commonly tracked
+  local common_configs=(
+    "nvim"
+    "kitty"
+    "tmux"
+    "fish"
+    "nushell"
+    "alacritty"
+    "wezterm"
+    "helix"
+    "git"
+    "starship"
+    "direnv"
+  )
+
+  for config_dir in "${common_configs[@]}"; do
+    local config_path="$HOME/.config/$config_dir"
+    if [ -d "$config_path" ] && [ ! -L "$config_path" ]; then
+      # Check if any files in this directory are already tracked individually
+      local has_tracked=false
+      if [ -f "$TRACKED_DOTFILES" ]; then
+        while IFS= read -r tracked_file; do
+          if [[ "$tracked_file" == ".config/$config_dir/"* ]]; then
+            has_tracked=true
+            break
+          fi
+        done < "$TRACKED_DOTFILES"
+      fi
+
+      if [ "$has_tracked" = false ] && [ ! -d "$DOTFILES_DIR/.config/$config_dir" ]; then
+        log_info "Found config directory (not auto-tracked, use 'pdrx track ~/.config/$config_dir' to track entire dir): $config_dir"
+      fi
+    fi
+  done
+
+  log_success "Dotfile sync complete: $found found, $tracked newly tracked, $skipped already tracked"
+}
+
 run_track() {
   require_initialized
   local f
@@ -3035,6 +3188,7 @@ ${BOLD}COMMANDS:${NC}
   source list                     List declared sources
   source apply                    Re-apply all declared sources (also runs at start of 'apply')
   sync                            Sync packages, sources refs, systemd units, and desktop into config
+  sync-dotfiles                   Auto-discover and track common dotfiles (.bashrc, .zshrc, .config/nvim, etc.)
   apply [--parallel]              Apply full declarative config (sources → packages → dotfiles → DE → units → hook)
   track FILE                      Track dotfile (copy + symlink)
   untrack FILE                    Untrack dotfile
@@ -3145,6 +3299,7 @@ case "$CMD" in
   search)      run_search "$@" ;;
   source)      run_source "$@" ;;
   sync)        run_sync "$@" ;;
+  sync-dotfiles) run_sync_dotfiles "$@" ;;
   apply)       run_apply "$@" ;;
   track)       run_track "$@" ;;
   untrack)     run_untrack "$@" ;;
