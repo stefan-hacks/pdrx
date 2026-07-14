@@ -16,7 +16,7 @@
 
 set -euo pipefail
 
-VERSION="1.8.3"
+VERSION="1.8.4"
 
 # =============================================================================
 # PORTABLE HELPERS
@@ -1855,14 +1855,18 @@ run_untrack() {
     if [ -d "$abs" ]; then
       log_info "Untracking directory: $abs"
       local untracked_count=0
+      # Get the directory path relative to HOME
+      local dir_rel="${abs#$HOME/}"
+      # Ensure dir_rel ends with / for proper matching
+      [[ "$dir_rel" == */ ]] || dir_rel="$dir_rel/"
+      
       # Get all tracked files that are within this directory
       if [ -f "$TRACKED_DOTFILES" ]; then
         while IFS= read -r tracked_file; do
           [ -z "$tracked_file" ] && continue
-          # Check if tracked file is within the target directory
-          if [[ "$tracked_file" == "${abs#$HOME/}"* ]] || \
-             [[ "$tracked_file" == "$f"* ]] || \
-             [[ "$abs/$tracked_file" == "$abs"/* ]]; then
+          # Check if tracked file is directly within the target directory
+          # Match: starts with "dir_rel" and has content after it
+          if [[ "$tracked_file" == "$dir_rel"* ]] && [ "${#tracked_file}" -gt "${#dir_rel}" ]; then
             local target="$HOME/$tracked_file"
             local dest="$DOTFILES_DIR/$tracked_file"
 
