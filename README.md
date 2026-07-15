@@ -15,7 +15,7 @@
 <!-- Dynamic Badges -->
 <p align="center">
   <a href="https://github.com/stefan-hacks/pdrx/releases">
-    <img src="https://img.shields.io/badge/v1.8.5-2ea043?style=for-the-badge&logo=semver&logoColor=white&label=version" alt="version" />
+    <img src="https://img.shields.io/badge/v1.9.0-2ea043?style=for-the-badge&logo=semver&logoColor=white&label=version" alt="version" />
   </a>
   <a href="#features">
     <img src="https://img.shields.io/badge/Ansible%20Export-EE0000?style=for-the-badge&logo=ansible&logoColor=white" alt="ansible" />
@@ -48,31 +48,47 @@
 
 ---
 
-## ✨ What's New in v1.8.5 — Thanks to @waldyrious
+## ✨ What's New in v1.9.0 — Critical Fixes & Drift Detection
+
+### 🔥 Critical Bug Fixes
+
+| Fix | Description |
+|-----|-------------|
+| **CRITICAL** | `destroy` now **actually respects `-n/--dry-run`** — previously it deleted `$PDRX_HOME` for real regardless of the flag |
+| **CRITICAL** | `track` now **rejects paths outside `$HOME`** instead of silently mis-recording them, which previously caused `apply` to deploy dotfiles to the wrong location and made them un-untrackable |
+| **CRITICAL** | **sudo is now optional** — falls back gracefully when already root or when sudo isn't installed (minimal containers, etc.) |
+| | Directory-mode `untrack` no longer reads and rewrites `tracked-dotfiles` from inside the same loop (was fragile; now collects matches first, mutates once) |
+| | Cleaned up remaining shellcheck warnings (SC2155, SC2295) |
+
+### 🩺 New: `pdrx doctor` (alias `fsck`) — System Drift Detection
+
+The new `doctor` command audits your declared config against actual system state:
+
+```bash
+pdrx doctor    # or: pdrx fsck
+```
+
+**What it checks:**
+- ✅ All packages in `packages.conf` are actually installed
+- ⚠️ **Drift detection**: apt packages installed manually outside pdrx (not in config)
+- ✅ Tracked dotfile symlink health (broken symlinks, missing targets)
+- ✅ Config layout integrity
+
+This closes the gap vs. Nix — you can now see what's "managed" vs "manually installed" at a glance.
 
 ### Changelog
 
 | Version | Changes |
 |---------|---------|
+| **v1.9.0** | CRITICAL: `destroy` respects dry-run; `track` rejects paths outside `$HOME`; sudo optional; `pdrx doctor` command added |
 | **v1.8.5** | Restored `sync-dotfiles` command that was accidentally removed |
 | **v1.8.4** | Fixed directory `untrack` to only affect files within the specified directory |
 | **v1.8.3** | Re-implemented directory tracking and `untrack` commands |
 | **v1.8.2** | 5 critical bug fixes: `untrack` restoration, pipefail handling, `apply` symlink conflicts, `pm_available` checks, audit log parallel flag |
 
-### 🐛 **Critical Bug Fixes** — Thanks to @waldyrious
-
-<div align="center">
-
-| Fix | Description |
-|-----|-------------|
-| <img src="https://img.shields.io/badge/CRITICAL-d73a4a?style=flat-square" /> | **Directory tracking** — `pdrx track ~/.config/dir` now works correctly instead of failing with "File not found" |
-| <img src="https://img.shields.io/badge/CRITICAL-d73a4a?style=flat-square" /> | **File restoration** — `pdrx untrack` now restores original files to their locations instead of leaving broken symlinks |
-
-</div>
-
 ---
 
-## 📦 Previous: v1.8.0
+## 📦 Previous: v1.8.0 — Ansible Export
 
 <div align="center">
 
@@ -262,6 +278,9 @@ ansible-playbook -i inventory site.yml
 
 ```bash
 pdrx init                   # Initialize pdrx (~/.pdrx)
+pdrx status                 # Show system status
+pdrx doctor                 # Audit config vs system state (drift detection)
+pdrx fsck                   # Same as doctor (alias)
 pdrx sync                   # Capture packages, sources, systemd
 pdrx sync-dotfiles          # Auto-discover common dotfiles
 pdrx sync-desktop           # Export desktop environment

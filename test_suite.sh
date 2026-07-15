@@ -82,7 +82,7 @@ test_help_version() {
     run_test "Help flag (--help)" "bash '$PDRX_SCRIPT' --help"
     run_test "Version flag (-v)" "bash '$PDRX_SCRIPT' -v"
     run_test "Version flag (--version)" "bash '$PDRX_SCRIPT' --version"
-    run_test "Version shows 1.7.0" "bash '$PDRX_SCRIPT' --version | grep -q '1.7.0'"
+    run_test "Version shows 1.9.0" "bash '$PDRX_SCRIPT' --version | grep -q '1.9.0'"
 }
 
 test_init() {

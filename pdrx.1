@@ -1,7 +1,7 @@
 .\" pdrx.1 - man page for pdrx
 .\" Portable Dynamic Reproducible gnu/linuX - reproducible Linux system setup
 .\" Use: groff -man -Tutf8 pdrx.1 | less
-.TH pdrx 1 "2025-07-12" "pdrx 1.8.0" "User Commands"
+.TH pdrx 1 "2026-07-15" "pdrx 1.9.0" "User Commands"
 .SH NAME
 pdrx \- Portable Dynamic Reproducible gnu/linuX: reproducible Linux system setup with declarative package config
 .SH SYNOPSIS
@@ -16,6 +16,9 @@ pdrx \- Portable Dynamic Reproducible gnu/linuX: reproducible Linux system setup
 .PP
 .B pdrx
 \fB\-\-install\fR
+.PP
+.B pdrx
+\fBdoctor\fR | \fBfsck\fR
 .SH DESCRIPTION
 .B pdrx
 (Portable Dynamic Reproducible gnu/linuX) is a pure Bash tool for fully reproducible Linux system setups. It has no Nix or other external dependency and works on Debian, Ubuntu, Fedora, Arch, openSUSE, and other major distributions.
@@ -80,6 +83,14 @@ Show current status: config path, backups path, OS and desktop IDs, detected pac
 .PP
 .RS
 .B pdrx status
+.RE
+.SS doctor (fsck)
+Audit the declared configuration against actual system state and report drift. Checks that packages declared in \fIpackages.conf\fR are actually installed, detects manually-installed apt packages not declared in pdrx, verifies tracked dotfile symlink health, and validates config layout integrity. Alias \fBfsck\fR is accepted for the same command.
+.PP
+.RS
+.B pdrx doctor
+.br
+.B pdrx fsck
 .RE
 .SS install
 Install one or more packages and record them in the declarative config. If multiple package managers are available, pdrx prompts you to choose one per package (or use \fB\-\-pm\fR to force a PM). The chosen PM is stored so that \fBpdrx apply\fR uses the same PM on another machine.
