@@ -153,6 +153,11 @@ curl -fsSL https://github.com/stefan-hacks/pdrx/releases/latest/download/pdrx -o
   && chmod +x ~/.local/bin/pdrx
 ```
 
+> 💡 **Already have pdrx?** Update to the latest version anytime with:
+> ```bash
+> pdrx self-update  # Checksum-verified update from GitHub releases
+> ```
+
 ### Capture Your System
 
 ```bash
