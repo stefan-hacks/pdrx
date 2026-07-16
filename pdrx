@@ -16,7 +16,11 @@
 
 set -euo pipefail
 
-VERSION="1.9.0"
+VERSION="1.9.1"
+# 1.9.1 changes:
+#   - FIX: pdrx doctor now lists the actual package names that are drifting
+#     between declared config and actual system state (not just counts)
+#
 # 1.9.0 changes:
 #   - FIX (critical): `destroy` now honors -n/--dry-run instead of always
 #     executing for real (previously deleted $PDRX_HOME even in dry-run mode)
@@ -1270,15 +1274,18 @@ run_doctor() {
   if pm_available apt && command -v apt-mark >/dev/null 2>&1; then
     echo "Checking for undeclared manually-installed apt packages..."
     local undeclared=0
+    local undeclared_list=""
     local manual_pkg
     while IFS= read -r manual_pkg; do
       [ -z "$manual_pkg" ] && continue
       if ! grep -qE "^apt:${manual_pkg}(=.*)?$" "$PACKAGES_CONF" 2>/dev/null; then
         undeclared=$((undeclared + 1))
+        undeclared_list="$undeclared_list $manual_pkg"
       fi
     done < <(apt-mark showmanual 2>/dev/null)
     if [ "$undeclared" -gt 0 ]; then
-      log_warning "  $undeclared apt package(s) installed manually but not in packages.conf"
+      log_warning "  $undeclared apt package(s) installed manually but not in packages.conf:"
+      echo "    $undeclared_list" | fold -s -w 75 | sed 's/^/    /'
       log_info "  Run 'pdrx sync' to capture current state, or install them via 'pdrx install' going forward"
       issues=$((issues + 1))
     else
