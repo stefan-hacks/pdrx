@@ -16,7 +16,13 @@
 
 set -euo pipefail
 
-VERSION="1.9.6"
+VERSION="1.9.7"
+# 1.9.7 changes:
+#   - FIX: pdrx --install now also installs the manpage (pdrx.1)
+#     - Looks for pdrx.1 in the same directory as the script
+#     - Installs to ~/.local/share/man/man1/
+#     - This ensures fresh installs get the complete documentation
+#
 # 1.9.6 changes:
 #   - FIX: Complete manpage rewrite with ALL commands, options, and features
 #     - Documented: init, status, doctor/fsck, install, remove, list, search
@@ -3303,9 +3309,22 @@ run_install_self() {
   local self
   self="$(get_script_path)"
   [ -f "$self" ] || self="$(cd "$(dirname "$0")" && pwd)/pdrx"
+  local script_dir
+  script_dir="$(dirname "$self")"
+  
+  # Install the binary
   mkdir -p "$install_dir"
   cp "$self" "$install_dir/pdrx"
   chmod +x "$install_dir/pdrx"
+  
+  # Install the manpage if it exists alongside the script
+  if [ -f "$script_dir/pdrx.1" ]; then
+    local man_dir="$HOME/.local/share/man/man1"
+    mkdir -p "$man_dir"
+    cp "$script_dir/pdrx.1" "$man_dir/pdrx.1"
+    log_success "Installed manpage to $man_dir/pdrx.1"
+  fi
+  
   # shellcheck disable=SC2016
   local path_line='export PATH="$PATH:$HOME/.local/bin"'
   local rc
