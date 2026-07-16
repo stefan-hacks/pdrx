@@ -48,17 +48,8 @@
 
 ---
 
-## ✨ What's New in v1.9.0 — Critical Fixes & Drift Detection
+## ✨ What's New in v1.9.2 — Critical Fixes & Drift Detection
 
-### 🔥 Critical Bug Fixes
-
-| Fix | Description |
-|-----|-------------|
-| **CRITICAL** | `destroy` now **actually respects `-n/--dry-run`** — previously it deleted `$PDRX_HOME` for real regardless of the flag |
-| **CRITICAL** | `track` now **rejects paths outside `$HOME`** instead of silently mis-recording them, which previously caused `apply` to deploy dotfiles to the wrong location and made them un-untrackable |
-| **CRITICAL** | **sudo is now optional** — falls back gracefully when already root or when sudo isn't installed (minimal containers, etc.) |
-| | Directory-mode `untrack` no longer reads and rewrites `tracked-dotfiles` from inside the same loop (was fragile; now collects matches first, mutates once) |
-| | Cleaned up remaining shellcheck warnings (SC2155, SC2295) |
 
 ### 🩺 New: `pdrx doctor` (alias `fsck`) — System Drift Detection
 
