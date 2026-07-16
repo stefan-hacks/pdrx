@@ -16,19 +16,24 @@
 
 set -euo pipefail
 
-VERSION="1.9.2"
+VERSION="1.9.3"
+# 1.9.3 changes:
+#   - FIX: pdrx self-update now also updates the manpage (pdrx.1)
+#     - Downloads manpage from release assets
+#     - Updates existing manpage in common locations
+#     - Falls back to ~/.local/share/man/man1 if not found
+#
 # 1.9.2 changes:
 #   - FIX: pdrx doctor completely rewritten with clear section-based output
-#     - Section 1: Missing declared packages (vertical list with bullet points)
-#     - Section 2: Undeclared manually-installed packages (drift detection)
-#     - Section 3: Tracked dotfiles health (symlink integrity)
-#     - Section 4: Config layout validation
-#     - Each section shows specific items or ✓ if all good
+#     - Section 1: Missing Declared Packages (vertical list with bullet points)
+#     - Section 2: Undeclared Manually-Installed Packages (Drift)
+#     - Section 3: Tracked Dotfiles health (symlink integrity)
+#     - Section 4: Config Layout validation
+#     - Each section shows ✓ if healthy or specific items if issues found
 #     - Summary banner at end with clear pass/fail indication
 #
 # 1.9.1 changes:
-#   - FIX: pdrx doctor now lists the actual package names that are drifting
-#     between declared config and actual system state (not just counts)
+#   - FIX: pdrx doctor now lists actual drifting packages (not just counts)
 #
 # 1.9.0 changes:
 #   - FIX (critical): `destroy` now honors -n/--dry-run instead of always
@@ -3353,6 +3358,48 @@ run_self_update() {
   chmod +x "$tmp"
   mv "$tmp" "$install_path"
   rm -f "$tmp_sum"
+
+  # Also update the manpage
+  log_info "Updating manpage..."
+  local man_url="https://github.com/stefan-hacks/pdrx/releases/download/${tag}/pdrx.1"
+  local man_dest=""
+  local man_dirs=(
+    "$HOME/.local/share/man/man1"
+    "$HOME/.local/man/man1"
+    "/usr/local/share/man/man1"
+    "/usr/share/man/man1"
+  )
+
+  # Find existing manpage location
+  for d in "${man_dirs[@]}"; do
+    if [ -f "$d/pdrx.1" ]; then
+      man_dest="$d/pdrx.1"
+      break
+    fi
+  done
+
+  # If no existing manpage, use ~/.local/share/man/man1 as default
+  if [ -z "$man_dest" ]; then
+    man_dest="$HOME/.local/share/man/man1/pdrx.1"
+    mkdir -p "$HOME/.local/share/man/man1"
+  fi
+
+  local tmp_man
+  tmp_man=$(mktemp)
+  if _fetch_to_file "$man_url" "$tmp_man" 2>/dev/null; then
+    # Verify it looks like a manpage (starts with .TH)
+    if head -1 "$tmp_man" | grep -q '^\.TH'; then
+      mv "$tmp_man" "$man_dest"
+      log_success "Updated manpage to $man_dest"
+    else
+      rm -f "$tmp_man"
+      log_warning "Manpage download did not contain valid manpage content"
+    fi
+  else
+    rm -f "$tmp_man"
+    log_warning "Could not download manpage (this is optional)"
+  fi
+
   log_action "self_update" "" "" "ok" "$VERSION->$remote_version"
   log_success "Updated pdrx to v$remote_version. Re-run pdrx to use the new version."
 }
