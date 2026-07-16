@@ -16,7 +16,14 @@
 
 set -euo pipefail
 
-VERSION="1.9.4"
+VERSION="1.9.5"
+# 1.9.5 changes:
+#   - FIX: pdrx destroy now also removes the manpage (pdrx.1)
+#     - Searches common manpage locations: ~/.local/share/man/man1,
+#       ~/.local/man/man1, /usr/local/share/man/man1, /usr/share/man/man1
+#     - Reports which manpage was removed
+#     - Respects --dry-run for manpage removal
+#
 # 1.9.4 changes:
 #   - FIX: self-update manpage validation now searches whole file for .TH
 #     - Previously only checked first line, but manpage has comments before .TH
@@ -3197,6 +3204,7 @@ run_destroy() {
   echo "  • Restore tracked dotfiles: replace symlinks with real files (content from pdrx copy)"
   echo "  • Remove $PDRX_HOME (config, backups, state)"
   echo "  • Remove pdrx from ~/.local/bin"
+  echo "  • Remove pdrx manpage (pdrx.1)"
   echo ""
   echo "Installed packages, added repo sources, and enabled systemd units will NOT be reverted."
   echo ""
@@ -3237,6 +3245,16 @@ run_destroy() {
   if [ "${DRY_RUN:-false}" = "true" ]; then
     log_info "[dry-run] would remove $PDRX_HOME"
     [ -f "$HOME/.local/bin/pdrx" ] && log_info "[dry-run] would remove $HOME/.local/bin/pdrx"
+    # Check for manpage in common locations
+    local man_dirs=(
+      "$HOME/.local/share/man/man1"
+      "$HOME/.local/man/man1"
+      "/usr/local/share/man/man1"
+      "/usr/share/man/man1"
+    )
+    for d in "${man_dirs[@]}"; do
+      [ -f "$d/pdrx.1" ] && log_info "[dry-run] would remove $d/pdrx.1"
+    done
     log_info "[dry-run] would strip pdrx PATH lines from ~/.bashrc and ~/.zshrc"
     log_info "[dry-run] destroy preview complete; nothing was changed"
     return 0
@@ -3244,6 +3262,20 @@ run_destroy() {
 
   rm -rf "$PDRX_HOME"
   [ -f "$HOME/.local/bin/pdrx" ] && rm -f "$HOME/.local/bin/pdrx"
+  
+  # Remove manpage from common locations
+  local man_dirs=(
+    "$HOME/.local/share/man/man1"
+    "$HOME/.local/man/man1"
+    "/usr/local/share/man/man1"
+    "/usr/share/man/man1"
+  )
+  for d in "${man_dirs[@]}"; do
+    if [ -f "$d/pdrx.1" ]; then
+      rm -f "$d/pdrx.1"
+      log_info "Removed manpage from $d/pdrx.1"
+    fi
+  done
   local rc
   for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
     if [ -f "$rc" ]; then
