@@ -16,7 +16,16 @@
 
 set -euo pipefail
 
-VERSION="1.9.1"
+VERSION="1.9.2"
+# 1.9.2 changes:
+#   - FIX: pdrx doctor completely rewritten with clear section-based output
+#     - Section 1: Missing declared packages (vertical list with bullet points)
+#     - Section 2: Undeclared manually-installed packages (drift detection)
+#     - Section 3: Tracked dotfiles health (symlink integrity)
+#     - Section 4: Config layout validation
+#     - Each section shows specific items or ✓ if all good
+#     - Summary banner at end with clear pass/fail indication
+#
 # 1.9.1 changes:
 #   - FIX: pdrx doctor now lists the actual package names that are drifting
 #     between declared config and actual system state (not just counts)
@@ -1246,10 +1255,12 @@ run_doctor() {
   log_header "pdrx Doctor"
 
   local issues=0
-  local checked=0
+  local section_issues=0
 
-  # 1. Declared packages vs. actually-installed reality.
-  echo "Checking declared packages against installed state..."
+  # Section 1: Declared packages that are NOT installed
+  echo ""
+  echo "━━━ Section 1: Missing Declared Packages ━━━"
+  section_issues=0
   if [ -s "$PACKAGES_CONF" ]; then
     local line
     while IFS= read -r line; do
@@ -1257,89 +1268,132 @@ run_doctor() {
       _parse_conf_line "$line"
       local pm="$PARSED_PM" pkg="$PARSED_PKG"
       [ -z "$pm" ] || [ -z "$pkg" ] && continue
-      checked=$((checked + 1))
       if ! pm_available "$pm"; then
-        log_warning "  $pm:$pkg — declared but '$pm' is not available on this machine"
-        issues=$((issues + 1))
+        if [ "$section_issues" -eq 0 ]; then
+          log_warning "The following packages are declared but their package manager is unavailable:"
+        fi
+        echo "  • $pm:$pkg (package manager '$pm' not available)"
+        section_issues=$((section_issues + 1))
       elif ! pm_is_installed "$pm" "$pkg" 2>/dev/null; then
-        log_warning "  $pm:$pkg — declared in packages.conf but NOT installed (run 'pdrx apply' to fix)"
-        issues=$((issues + 1))
+        if [ "$section_issues" -eq 0 ]; then
+          log_warning "The following declared packages are NOT currently installed:"
+        fi
+        echo "  • $pm:$pkg"
+        section_issues=$((section_issues + 1))
       fi
     done < "$PACKAGES_CONF"
   fi
-  echo "  $checked declared package(s) checked."
+  if [ "$section_issues" -eq 0 ]; then
+    echo "  ✓ All declared packages are installed."
+  else
+    log_info "  → Run 'pdrx apply' to install missing packages"
+    issues=$((issues + section_issues))
+  fi
 
-  # 2. Manually-installed apt packages that pdrx doesn't know about (drift).
-  #    Best-effort — only runs when apt/dpkg is available.
+  # Section 2: Manually-installed apt packages not in pdrx
+  echo ""
+  echo "━━━ Section 2: Undeclared Manually-Installed Packages (Drift) ━━━"
+  section_issues=0
   if pm_available apt && command -v apt-mark >/dev/null 2>&1; then
-    echo "Checking for undeclared manually-installed apt packages..."
-    local undeclared=0
-    local undeclared_list=""
     local manual_pkg
     while IFS= read -r manual_pkg; do
       [ -z "$manual_pkg" ] && continue
       if ! grep -qE "^apt:${manual_pkg}(=.*)?$" "$PACKAGES_CONF" 2>/dev/null; then
-        undeclared=$((undeclared + 1))
-        undeclared_list="$undeclared_list $manual_pkg"
+        if [ "$section_issues" -eq 0 ]; then
+          log_warning "The following apt packages are installed manually but NOT tracked by pdrx:"
+        fi
+        echo "  • apt:$manual_pkg"
+        section_issues=$((section_issues + 1))
       fi
     done < <(apt-mark showmanual 2>/dev/null)
-    if [ "$undeclared" -gt 0 ]; then
-      log_warning "  $undeclared apt package(s) installed manually but not in packages.conf:"
-      echo "    $undeclared_list" | fold -s -w 75 | sed 's/^/    /'
-      log_info "  Run 'pdrx sync' to capture current state, or install them via 'pdrx install' going forward"
-      issues=$((issues + 1))
-    else
-      echo "  No undeclared apt packages found."
-    fi
+  fi
+  if [ "$section_issues" -eq 0 ]; then
+    echo "  ✓ No drift detected - all manually-installed packages are tracked."
+  else
+    log_info "  → Run 'pdrx sync' to capture these packages, or 'pdrx install --pm apt <pkg>' going forward"
+    issues=$((issues + 1))
   fi
 
-  # 3. Tracked dotfiles: symlink integrity.
-  echo "Checking tracked dotfiles..."
+  # Section 3: Tracked dotfiles issues
+  echo ""
+  echo "━━━ Section 3: Tracked Dotfiles ━━━"
+  section_issues=0
   if [ -f "$TRACKED_DOTFILES" ] && [ -s "$TRACKED_DOTFILES" ]; then
-    local rel broken=0 total=0
+    local rel
     while IFS= read -r rel; do
       [ -z "$rel" ] && continue
-      total=$((total + 1))
       local target="$HOME/$rel"
       local src="$DOTFILES_DIR/$rel"
       if [ ! -f "$src" ]; then
-        log_warning "  $rel — tracked but backing copy missing: $src"
-        broken=$((broken + 1))
+        if [ "$section_issues" -eq 0 ]; then
+          log_warning "The following dotfiles have issues:"
+        fi
+        echo "  • $rel — backing copy missing at $src"
+        section_issues=$((section_issues + 1))
       elif [ -e "$target" ] && [ ! -L "$target" ]; then
-        log_warning "  $rel — exists at $target but is not a symlink (drifted; run 'pdrx apply' or re-track)"
-        broken=$((broken + 1))
+        if [ "$section_issues" -eq 0 ]; then
+          log_warning "The following dotfiles have issues:"
+        fi
+        echo "  • $rel — exists but is not a symlink (drifted)"
+        section_issues=$((section_issues + 1))
       elif [ ! -e "$target" ]; then
-        log_warning "  $rel — symlink missing at $target (run 'pdrx apply' to redeploy)"
-        broken=$((broken + 1))
+        if [ "$section_issues" -eq 0 ]; then
+          log_warning "The following dotfiles have issues:"
+        fi
+        echo "  • $rel — symlink missing at $target"
+        section_issues=$((section_issues + 1))
       fi
     done < "$TRACKED_DOTFILES"
-    if [ "$broken" -gt 0 ]; then
-      issues=$((issues + broken))
-    else
-      echo "  $total tracked dotfile(s), all healthy."
-    fi
+  fi
+  if [ "$section_issues" -eq 0 ]; then
+    echo "  ✓ All tracked dotfiles are healthy."
   else
-    echo "  No dotfiles tracked."
+    log_info "  → Run 'pdrx apply' to restore dotfiles"
+    issues=$((issues + section_issues))
   fi
 
-  # 4. Config directory sanity.
-  echo "Checking config layout..."
-  local required_dir
-  for required_dir in "$PDRX_CONFIG" "$PDRX_BACKUP" "$DOTFILES_DIR"; do
-    if [ ! -d "$required_dir" ]; then
-      log_warning "  Missing expected directory: $required_dir"
-      issues=$((issues + 1))
+  # Section 4: Config layout sanity
+  echo ""
+  echo "━━━ Section 4: Config Layout ━━━"
+  section_issues=0
+  for req in "$PACKAGES_CONF" "$SOURCES_CONF" "$SYSTEMD_CONF"; do
+    if [ ! -f "$req" ]; then
+      if [ "$section_issues" -eq 0 ]; then
+        log_warning "The following config files are missing:"
+      fi
+      echo "  • $(basename "$req")"
+      section_issues=$((section_issues + 1))
     fi
   done
-  [ -w "$PDRX_CONFIG" ] || { log_warning "  $PDRX_CONFIG is not writable"; issues=$((issues + 1)); }
+  for req_dir in "$PDRX_CONFIG" "$PDRX_STATE" "$PDRX_BACKUP"; do
+    if [ ! -d "$req_dir" ]; then
+      if [ "$section_issues" -eq 0 ]; then
+        log_warning "The following directories are missing:"
+      fi
+      echo "  • $req_dir"
+      section_issues=$((section_issues + 1))
+    fi
+  done
+  if [ "$section_issues" -eq 0 ]; then
+    echo "  ✓ Config layout is valid."
+  else
+    log_warning "  → Config layout issues detected"
+    issues=$((issues + section_issues))
+  fi
 
+  # Summary
   echo ""
   if [ "$issues" -eq 0 ]; then
-    log_success "No issues found."
+    log_success "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    log_success "  ✓ All checks passed - no drift detected!"
+    log_success "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    return 0
   else
-    log_warning "$issues issue(s) found. See above for details."
+    log_warning "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    log_warning "  ⚠ $issues issue(s) found across sections above"
+    log_warning "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    return 1
   fi
-  return "$([ "$issues" -eq 0 ] && echo 0 || echo 1)"
 }
 
 run_install() {

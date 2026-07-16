@@ -15,7 +15,7 @@
 <!-- Dynamic Badges -->
 <p align="center">
   <a href="https://github.com/stefan-hacks/pdrx/releases">
-    <img src="https://img.shields.io/badge/v1.9.1-2ea043?style=for-the-badge&logo=semver&logoColor=white&label=version" alt="version" />
+    <img src="https://img.shields.io/badge/v1.9.2-2ea043?style=for-the-badge&logo=semver&logoColor=white&label=version" alt="version" />
   </a>
   <a href="#features">
     <img src="https://img.shields.io/badge/Ansible%20Export-EE0000?style=for-the-badge&logo=ansible&logoColor=white" alt="ansible" />
@@ -80,6 +80,7 @@ This closes the gap vs. Nix — you can now see what's "managed" vs "manually in
 
 | Version | Changes |
 |---------|---------|
+| **v1.9.2** | pdrx doctor completely rewritten - clear section-based output with vertical lists of drifting items |
 | **v1.9.1** | pdrx doctor now lists actual drifting packages (not just counts) |
 | **v1.9.0** | CRITICAL: `destroy` respects dry-run; `track` rejects paths outside `$HOME`; sudo optional; `pdrx doctor` command added |
 | **v1.8.5** | Restored `sync-dotfiles` command that was accidentally removed |
