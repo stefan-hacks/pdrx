@@ -48,7 +48,7 @@
 
 ---
 
-## ✨ What's New in v1.9.2 — Critical Fixes & Drift Detection
+## ✨ What's New in v1.9.8 — One-Line Installer
 
 
 ### 🩺 New: `pdrx doctor` (alias `fsck`) — System Drift Detection
@@ -71,6 +71,11 @@ This closes the gap vs. Nix — you can now see what's "managed" vs "manually in
 
 | Version | Changes |
 |---------|---------|
+| **v1.9.8** | **NEW:** One-line installer script - `curl .../install.sh | bash` installs binary + manpage instantly |
+| **v1.9.7** | `pdrx --install` now also installs the manpage (pdrx.1) automatically |
+| **v1.9.6** | Complete manpage rewrite with ALL 20+ commands and every option documented |
+| **v1.9.5** | `pdrx destroy` now removes the manpage from all common locations |
+| **v1.9.4** | Fixed manpage validation in self-update (was only checking first line, now searches entire file) |
 | **v1.9.3** | `pdrx self-update` now also updates the manpage (pdrx.1) - no more outdated man pages! |
 | **v1.9.2** | pdrx doctor completely rewritten - clear section-based output with vertical lists of drifting items |
 | **v1.9.1** | pdrx doctor now lists actual drifting packages (not just counts) |
