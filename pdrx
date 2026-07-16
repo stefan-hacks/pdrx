@@ -16,7 +16,13 @@
 
 set -euo pipefail
 
-VERSION="1.9.7"
+VERSION="1.9.8"
+# 1.9.8 changes:
+#   - NEW: One-line installer script (install.sh)
+#     - curl -fsSL .../install.sh | bash installs binary + manpage
+#     - Auto-detects latest version from GitHub API
+#     - Adds ~/.local/bin to PATH if missing
+#
 # 1.9.7 changes:
 #   - FIX: pdrx --install now also installs the manpage (pdrx.1)
 #     - Looks for pdrx.1 in the same directory as the script

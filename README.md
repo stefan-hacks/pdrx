@@ -15,7 +15,7 @@
 <!-- Dynamic Badges -->
 <p align="center">
   <a href="https://github.com/stefan-hacks/pdrx/releases">
-    <img src="https://img.shields.io/badge/v1.9.7-2ea043?style=for-the-badge&logo=semver&logoColor=white&label=version" alt="version" />
+    <img src="https://img.shields.io/badge/v1.9.8-2ea043?style=for-the-badge&logo=semver&logoColor=white&label=version" alt="version" />
   </a>
   <a href="#features">
     <img src="https://img.shields.io/badge/Ansible%20Export-EE0000?style=for-the-badge&logo=ansible&logoColor=white" alt="ansible" />
@@ -142,8 +142,16 @@ pdrx apply --parallel   # Installs all packages, restores DE, deploys dotfiles
 
 ### Install (Any Linux Distro)
 
+**One-line installer** (binary + manpage):
+
 ```bash
-curl -fsSL https://github.com/stefan-hacks/pdrx/releases/latest/download/pdrx -o ~/.local/bin/pdrx \
+curl -fsSL https://github.com/stefan-hacks/pdrx/releases/latest/download/install.sh | bash
+```
+
+**Or manually download:**
+
+```bash
+curl -fsSL https://github.com/stefan-hacks/pdrx/releases/latest/download/pdrx -o ~/.local/bin/pdrx \\
   && chmod +x ~/.local/bin/pdrx
 ```
 
