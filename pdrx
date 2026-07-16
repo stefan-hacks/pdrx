@@ -16,7 +16,16 @@
 
 set -euo pipefail
 
-VERSION="1.9.5"
+VERSION="1.9.6"
+# 1.9.6 changes:
+#   - FIX: Complete manpage rewrite with ALL commands, options, and features
+#     - Documented: init, status, doctor/fsck, install, remove, list, search
+#     - Documented: apply, track, untrack, backup, restore, clean, history
+#     - Documented: source, systemd, desktop, sync, rollback, upgrade
+#     - Documented: self-update, export, import, destroy
+#     - All options: --help, --version, --quiet, --debug, --yes, --dry-run
+#     - All options: --config, --install, --pm, --pin, --parallel
+#
 # 1.9.5 changes:
 #   - FIX: pdrx destroy now also removes the manpage (pdrx.1)
 #     - Searches common manpage locations: ~/.local/share/man/man1,
