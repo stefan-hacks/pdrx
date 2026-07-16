@@ -15,7 +15,7 @@
 <!-- Dynamic Badges -->
 <p align="center">
   <a href="https://github.com/stefan-hacks/pdrx/releases">
-    <img src="https://img.shields.io/badge/v1.9.3-2ea043?style=for-the-badge&logo=semver&logoColor=white&label=version" alt="version" />
+    <img src="https://img.shields.io/badge/v1.9.4-2ea043?style=for-the-badge&logo=semver&logoColor=white&label=version" alt="version" />
   </a>
   <a href="#features">
     <img src="https://img.shields.io/badge/Ansible%20Export-EE0000?style=for-the-badge&logo=ansible&logoColor=white" alt="ansible" />

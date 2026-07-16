@@ -16,7 +16,11 @@
 
 set -euo pipefail
 
-VERSION="1.9.3"
+VERSION="1.9.4"
+# 1.9.4 changes:
+#   - FIX: self-update manpage validation now searches whole file for .TH
+#     - Previously only checked first line, but manpage has comments before .TH
+#
 # 1.9.3 changes:
 #   - FIX: pdrx self-update now also updates the manpage (pdrx.1)
 #     - Downloads manpage from release assets
@@ -3387,8 +3391,8 @@ run_self_update() {
   local tmp_man
   tmp_man=$(mktemp)
   if _fetch_to_file "$man_url" "$tmp_man" 2>/dev/null; then
-    # Verify it looks like a manpage (starts with .TH)
-    if head -1 "$tmp_man" | grep -q '^\.TH'; then
+    # Verify it looks like a manpage (contains .TH directive)
+    if grep -q '^\.TH' "$tmp_man" 2>/dev/null; then
       mv "$tmp_man" "$man_dest"
       log_success "Updated manpage to $man_dest"
     else
