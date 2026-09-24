@@ -16,7 +16,16 @@
 
 set -euo pipefail
 
-VERSION="1.9.8"
+VERSION="1.9.9"
+# 1.9.9 changes:
+#   - FIX: pdrx apply --dotfiles now works on existing systems.
+#     Previously, apply only deployed files listed in tracked-dotfiles, so
+#     newly-added dotfiles in the repo were silently ignored. Now
+#     --dotfiles walks the entire DOTFILES_DIR tree and ensures every file
+#     is symlinked/copied into $HOME.
+#   - NEW: Selective apply flags: --packages, --systemd, --desktop, --dotfiles
+#     All flags can be combined. With no flags, apply runs everything (backward compatible).
+#
 # 1.9.8 changes:
 #   - NEW: One-line installer script (install.sh)
 #     - curl -fsSL .../install.sh | bash installs binary + manpage
@@ -1799,56 +1808,79 @@ run_apply() {
   require_initialized
   log_header "Apply: reproduce declared system state"
 
+  local APPLY_PACKAGES=false
+  local APPLY_SYSTEMD=false
+  local APPLY_DESKTOP=false
+  local APPLY_DOTFILES=false
+  local APPLY_ALL=true
   local PARALLEL=false
+
   while [ $# -gt 0 ]; do
     case "$1" in
+      --packages) APPLY_PACKAGES=true; APPLY_ALL=false; shift ;;
+      --systemd)  APPLY_SYSTEMD=true;  APPLY_ALL=false; shift ;;
+      --desktop)  APPLY_DESKTOP=true;  APPLY_ALL=false; shift ;;
+      --dotfiles) APPLY_DOTFILES=true; APPLY_ALL=false; shift ;;
       --parallel) PARALLEL=true; shift ;;
       *) shift ;;
     esac
   done
 
-  # Sources MUST be wired up before package install, or packages outside
-  # default distro repos (docker-ce, PPAs, COPRs, flathub apps) fail to
-  # resolve on a genuinely fresh machine.
-  _apply_sources 2>/dev/null || true
-
-  if [ "$PARALLEL" = "true" ]; then
-    _run_apply_parallel
-  else
-    _run_apply_sequential
+  if [ "$APPLY_ALL" = "true" ]; then
+    APPLY_PACKAGES=true
+    APPLY_SYSTEMD=true
+    APPLY_DESKTOP=true
+    APPLY_DOTFILES=true
   fi
 
-  if [ -f "$TRACKED_DOTFILES" ]; then
-    local rel
-    while IFS= read -r rel; do
-      [ -z "$rel" ] && continue
-      local src="$DOTFILES_DIR/$rel"
-      local dest="$HOME/$rel"
-      if [ -f "$src" ]; then
-        mkdir -p "$(dirname "$dest")"
-        if [ "${DRY_RUN:-false}" = "true" ]; then
-          log_info "[dry-run] would deploy dotfile: $rel"
-        else
-          # FIX (1.8.0): the steady state after `pdrx track` is that $dest
-          # is already a symlink pointing at $src. Blindly `cp`-ing into it
-          # made cp fail with "are the same file" every single apply run.
-          # Mirror track's own mechanism (symlink) and only touch $dest
-          # when it isn't already correctly linked.
-          if [ -L "$dest" ] && [ "$(readlink -f "$dest" 2>/dev/null)" = "$(readlink -f "$src" 2>/dev/null)" ]; then
-            log_debug "Dotfile already deployed: $rel"
+  if [ "$APPLY_PACKAGES" = "true" ]; then
+    _apply_sources 2>/dev/null || true
+    if [ "$PARALLEL" = "true" ]; then
+      _run_apply_parallel
+    else
+      _run_apply_sequential
+    fi
+  fi
+
+  if [ "$APPLY_DOTFILES" = "true" ]; then
+    if [ -d "$DOTFILES_DIR" ]; then
+      log_header "Applying dotfiles"
+      local count=0
+      while IFS= read -r -d '' src; do
+        local rel="${src#"$DOTFILES_DIR"/}"
+        local dest="$HOME/$rel"
+        if [ -f "$src" ]; then
+          mkdir -p "$(dirname "$dest")"
+          if [ "${DRY_RUN:-false}" = "true" ]; then
+            log_info "[dry-run] would deploy dotfile: $rel"
           else
-            rm -f "$dest" 2>/dev/null || true
-            ln -sf "$src" "$dest" 2>/dev/null || cp "$src" "$dest"
-            log_info "Deployed dotfile: $rel"
+            if [ -L "$dest" ] && [ "$(readlink -f "$dest" 2>/dev/null)" = "$(readlink -f "$src" 2>/dev/null)" ]; then
+              log_debug "Dotfile already deployed: $rel"
+            else
+              rm -f "$dest" 2>/dev/null || true
+              ln -sf "$src" "$dest" 2>/dev/null || cp "$src" "$dest"
+              log_info "Deployed dotfile: $rel"
+              count=$((count + 1))
+            fi
           fi
         fi
-      fi
-    done < "$TRACKED_DOTFILES"
+      done < <(find "$DOTFILES_DIR" -type f -print0 2>/dev/null)
+      log_success "Dotfiles applied: $count deployed"
+    fi
   fi
 
-  run_restore_desktop 2>/dev/null || true
-  run_apply_systemd 2>/dev/null || true
-  run_apply_hooks
+  if [ "$APPLY_DESKTOP" = "true" ]; then
+    run_restore_desktop 2>/dev/null || true
+  fi
+
+  if [ "$APPLY_SYSTEMD" = "true" ]; then
+    run_apply_systemd 2>/dev/null || true
+  fi
+
+  if [ "$APPLY_ALL" = "true" ]; then
+    run_apply_hooks
+  fi
+
   log_action "apply" "" "" "ok" "$([ "$PARALLEL" = "true" ] && echo parallel || echo sequential)"
 }
 
@@ -3533,7 +3565,13 @@ ${BOLD}COMMANDS:${NC}
   source apply                    Re-apply all declared sources (also runs at start of 'apply')
   sync                            Sync packages, sources refs, systemd units, and desktop into config
   sync-dotfiles                   Auto-discover and track common dotfiles (.bashrc, .zshrc, .config/nvim, etc.)
-  apply [--parallel]              Apply full declarative config (sources → packages → dotfiles → DE → units → hook)
+  apply [--parallel | --packages | --systemd | --desktop | --dotfiles]
+                                  Apply full or selective declarative config
+                                  (sources → packages → dotfiles → DE → units → hooks)
+                                  --packages: install only missing packages
+                                  --systemd:  enable only systemd units
+                                  --desktop:  restore only desktop/DE state
+                                  --dotfiles: deploy only dotfiles (scans entire DOTFILES_DIR)
   track FILE                      Track dotfile (copy + symlink)
   untrack FILE                    Untrack dotfile
   hook edit                       Create/open the post-apply hook script (~/.pdrx/config/hooks/post-apply.sh)
@@ -3568,6 +3606,8 @@ ${BOLD}EXAMPLES:${NC}
   pdrx source add dnf https://download.docker.com/linux/fedora/docker-ce.repo
   pdrx remove vim                             # remove (uses recorded PM)
   pdrx -n apply --parallel                    # dry-run a full parallel restore
+  pdrx apply --dotfiles                       # deploy only dotfiles (fast, no packages)
+  pdrx apply --packages --systemd               # deploy packages + systemd units only
   pdrx hook edit                              # add custom post-apply glue (udev reload, etc.)
   pdrx self-update                            # checksum-verified update to latest release
   pdrx upgrade                                # upgrade all packages
