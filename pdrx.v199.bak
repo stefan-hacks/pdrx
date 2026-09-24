@@ -16,11 +16,7 @@
 
 set -euo pipefail
 
-VERSION="2.0.0"
-# 2.0.0 changes:
-#   - sync: complete rewrite. Now creates backup, removes stale repo files,
-#     commits changes to git, and rotates backups (keeps last 20).
-#   - apply --dotfiles: walks entire DOTFILES_DIR tree (v1.9.9).
+VERSION="1.9.9"
 # 1.9.9 changes:
 #   - FIX: pdrx apply --dotfiles now works on existing systems.
 #     Previously, apply only deployed files listed in tracked-dotfiles, so
@@ -1772,44 +1768,6 @@ run_sync() {
   require_initialized
   log_header "Sync: capture system state into declarative config"
 
-  # ── Step 0: Backup current state ──
-  log_info "Creating backup of current declarative state..."
-  run_backup "pre-sync"
-  _rotate_backups
-
-  # ── Step 1: Remove stale repo files (no longer exist locally) ──
-  log_header "Checking for stale dotfiles"
-  local stale_count=0
-  if [ -f "$TRACKED_DOTFILES" ]; then
-    local tmp_tracked
-    tmp_tracked=$(mktemp)
-    while IFS= read -r rel; do
-      [ -z "$rel" ] && continue
-      [[ "$rel" == \#* ]] && continue
-      local local_path="$HOME/$rel"
-      local repo_path="$DOTFILES_DIR/$rel"
-      if [ ! -e "$local_path" ]; then
-        # Local file no longer exists — remove from repo
-        if [ -e "$repo_path" ]; then
-          rm -rf "$repo_path" 2>/dev/null || true
-          log_info "Removed stale (deleted locally): $rel"
-          stale_count=$((stale_count + 1))
-        fi
-        # Skip adding to new tracked list (effectively untracks it)
-      else
-        # Still exists locally — keep in tracked list
-        echo "$rel" >> "$tmp_tracked"
-      fi
-    done < "$TRACKED_DOTFILES"
-    mv "$tmp_tracked" "$TRACKED_DOTFILES"
-  fi
-  if [ "$stale_count" -gt 0 ]; then
-    log_success "Removed $stale_count stale dotfile(s) from repo"
-  else
-    log_info "No stale dotfiles found"
-  fi
-
-  # ── Step 2: Sync packages ──
   local tmp
   tmp=$(mktemp)
   local pm
@@ -1840,47 +1798,10 @@ run_sync() {
   mv "$atomic_tmp" "$PACKAGES_CONF"
   rm -f "${PACKAGES_CONF}.new"
 
-  # ── Step 3: Sync systemd and desktop ──
   run_sync_systemd 2>/dev/null || true
   run_sync_desktop 2>/dev/null || true
-
-  # ── Step 4: Re-copy tracked dotfiles from local to repo ──
-  log_header "Syncing tracked dotfiles"
-  local synced_count=0
-  if [ -f "$TRACKED_DOTFILES" ]; then
-    while IFS= read -r rel; do
-      [ -z "$rel" ] && continue
-      [[ "$rel" == \#* ]] && continue
-      local src="$HOME/$rel"
-      local dest="$DOTFILES_DIR/$rel"
-      if [ -f "$src" ]; then
-        mkdir -p "$(dirname "$dest")"
-        cp "$src" "$dest"
-        synced_count=$((synced_count + 1))
-      elif [ -d "$src" ]; then
-        mkdir -p "$dest"
-        cp -R "$src/"* "$dest/" 2>/dev/null || true
-        synced_count=$((synced_count + 1))
-      fi
-    done < "$TRACKED_DOTFILES"
-  fi
-  log_success "Synced $synced_count dotfile(s)"
-
-  # ── Step 5: Git commit if in a repo ──
-  if [ -d ".git" ] || git rev-parse --git-dir >/dev/null 2>&1; then
-    log_header "Committing changes to git"
-    git add -A 2>/dev/null || true
-    if git diff --cached --quiet 2>/dev/null; then
-      log_info "No changes to commit"
-    else
-      local sync_msg="pdrx sync: $(date '+%Y-%m-%d %H:%M:%S')"
-      git commit -m "$sync_msg" 2>/dev/null || true
-      log_success "Committed: $sync_msg"
-    fi
-  fi
-
   log_action "sync" "" "" "ok"
-  log_success "Synced packages, sources, systemd units, desktop state, and dotfiles"
+  log_success "Synced packages, sources, systemd units, and desktop state"
 }
 
 run_apply() {
@@ -2498,25 +2419,6 @@ run_untrack() {
     log_action "untrack" "" "$rel" "ok"
     log_success "Untracked $rel"
   done
-}
-
-
-_rotate_backups() {
-  # Keep only the last 20 backups. Remove oldest first.
-  local max=20
-  local dirs=()
-  local d
-  while IFS= read -r d; do
-    [ -n "$d" ] && [ -d "$PDRX_BACKUP/$d" ] && dirs+=("$d")
-  done < <(_list_backup_dirs_oldest_first)
-  local total=${#dirs[@]}
-  if [ "$total" -gt "$max" ]; then
-    local remove=$((total - max))
-    local i
-    for ((i = 0; i < remove; i++)); do
-      [ -n "${dirs[$i]}" ] && rm -rf "${PDRX_BACKUP:?}/${dirs[$i]}" && log_info "Rotated old backup: ${dirs[$i]}"
-    done
-  fi
 }
 
 run_backup() {
@@ -3661,9 +3563,7 @@ ${BOLD}COMMANDS:${NC}
   source add <pm> ...             Declare a repo/PPA/remote (apt, apt-repo, dnf, zypper, flatpak)
   source list                     List declared sources
   source apply                    Re-apply all declared sources (also runs at start of 'apply')
-  sync                            Sync local state into declarative config (packages, systemd,
-                                  desktop, dotfiles), create backup, remove stale repo files,
-                                  auto-commit to git, rotate backups (keep last 20)
+  sync                            Sync packages, sources refs, systemd units, and desktop into config
   sync-dotfiles                   Auto-discover and track common dotfiles (.bashrc, .zshrc, .config/nvim, etc.)
   apply [--parallel | --packages | --systemd | --desktop | --dotfiles]
                                   Apply full or selective declarative config

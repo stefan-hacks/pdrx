@@ -1,7 +1,7 @@
 .\" pdrx.1 - man page for pdrx
 .\" Portable Dynamic Reproducible gnu/linuX - reproducible Linux system setup
 .\" Use: groff -man -Tutf8 pdrx.1 | less
-.TH pdrx 1 "2026-09-23" "pdrx 1.9.9" "User Commands"
+.TH pdrx 1 "2026-09-23" "pdrx 2.0.0" "User Commands"
 .SH NAME
 pdrx \- Portable Dynamic Reproducible gnu/linuX: reproducible Linux system setup with declarative package config
 .SH SYNOPSIS
@@ -148,7 +148,9 @@ Export or import desktop environment settings.
 .br
 \fBpdrx desktop import\fR [\fB\-\-merge\fR|\fB\-\-replace\fR]
 .SS sync
-Sync declarative config with actual system state (records manually-installed packages).
+Sync declarative config with actual system state. Automatically creates a backup,
+removes stale repo files (files deleted locally), re-copies tracked dotfiles from
+local to repo, commits changes to git, and rotates backups (keeps last 20).
 .PP
 \fBpdrx sync\fR
 .SS rollback

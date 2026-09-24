@@ -15,7 +15,7 @@
 <!-- Dynamic Badges -->
 <p align="center">
   <a href="https://github.com/stefan-hacks/pdrx/releases">
-    <img src="https://img.shields.io/badge/v1.9.9-2ea043?style=for-the-badge&logo=semver&logoColor=white&label=version" alt="version" />
+    <img src="https://img.shields.io/badge/v2.0.0-2ea043?style=for-the-badge&logo=semver&logoColor=white&label=version" alt="version" />
   </a>
   <a href="#features">
     <img src="https://img.shields.io/badge/Ansible%20Export-EE0000?style=for-the-badge&logo=ansible&logoColor=white" alt="ansible" />
@@ -45,6 +45,50 @@
 </p>
 
 </div>
+
+---
+
+## ✨ What's New in v2.0.0 — Full Two-Way Sync with Backups
+
+### 🔄 Fixed: `pdrx sync` now properly two-way syncs
+
+Previously, `pdrx sync` only captured packages and systemd — dotfiles were never
+synced back to the repo, and stale files (deleted locally but still in repo)
+were never cleaned up.
+
+**Now:**
+- Creates a **backup** before every sync (stores in `backups/`)
+- **Syncs dotfiles** — copies all tracked dotfiles from `$HOME` back to the repo
+- **Removes stale files** — deletes repo files that no longer exist locally
+- **Auto-commits** changes to git with a timestamped message
+- **Rotates backups** — keeps only the last 20, removes older ones
+
+### One command does everything:
+```bash
+pdrx sync
+```
+
+### Backup rotation (keeps last 20)
+
+Backups are stored in `~/.config/pdrx/<profile>/backups/` with timestamps:
+```
+backups/
+├── 20260923_143000_pre-sync/
+├── 20260923_145030_pre-sync/
+└── ... (max 20)
+```
+
+When the 21st backup is created, the oldest is automatically removed.
+
+### Changelog
+
+| Version | Changes |
+|---------|---------|
+| **v2.0.0** | **FIX:** `sync` now backs up, syncs dotfiles, removes stale files, auto-commits, rotates backups |
+| | **NEW:** `_rotate_backups` helper keeps last 20 backups |
+| | **FIX:** `run_sync()` now copies dotfiles from local to repo (two-way) |
+| | **FIX:** `run_sync()` removes repo files that no longer exist locally |
+| | **FIX:** `run_sync()` auto-commits changes to git |
 
 ---
 
