@@ -1,7 +1,7 @@
 .\" pdrx.1 - man page for pdrx
 .\" Portable Dynamic Reproducible gnu/linuX - reproducible Linux system setup
 .\" Use: groff -man -Tutf8 pdrx.1 | less
-.TH pdrx 1 "2026-07-15" "pdrx 1.9.8" "User Commands"
+.TH pdrx 1 "2026-09-23" "pdrx 1.9.9" "User Commands"
 .SH NAME
 pdrx \- Portable Dynamic Reproducible gnu/linuX: reproducible Linux system setup with declarative package config
 .SH SYNOPSIS
@@ -82,9 +82,21 @@ Search for packages across available package managers. Supports parallel search.
 .PP
 \fBpdrx search\fR [\fB\-\-parallel\fR] \fITERM\fR [\fIPM_NUM\fR ...]
 .SS apply
-Apply declarative config: install all packages, add sources, enable systemd units, apply dotfiles, and restore desktop settings.
+Apply declarative config: install all packages, add sources, enable systemd units, apply dotfiles, and restore desktop settings. With flags, apply only selected components (useful on existing systems).
 .PP
-\fBpdrx apply\fR [\fB\-n\fR]
+\fBpdrx apply\fR [\fB\-n\fR] [\fB\-\-parallel\fR] [\fB\-\-packages\fR | \fB\-\-dotfiles\fR | \fB\-\-systemd\fR | \fB\-\-desktop\fR]
+.PP
+\fB\-\-parallel\fR    Install packages in parallel (faster on fresh systems)
+.br
+\fB\-\-packages\fR    Install only declared packages that are missing
+.br
+\fB\-\-dotfiles\fR    Deploy all dotfiles from the repo (scans entire DOTFILES_DIR)
+.br
+\fB\-\-systemd\fR     Enable only systemd units declared in systemd.conf
+.br
+\fB\-\-desktop\fR     Restore only desktop/DE settings
+.br
+\fB\-n\fR, \fB\-\-dry\-run\fR  Show what would be done without making changes
 .SS track
 Track a dotfile (e.g. \fI~/.bashrc\fR). Creates symlink from original to pdrx copy. Paths outside $HOME are rejected.
 .PP
