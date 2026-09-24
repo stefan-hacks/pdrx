@@ -15,7 +15,7 @@
 <!-- Dynamic Badges -->
 <p align="center">
   <a href="https://github.com/stefan-hacks/pdrx/releases">
-    <img src="https://img.shields.io/badge/v1.9.8-2ea043?style=for-the-badge&logo=semver&logoColor=white&label=version" alt="version" />
+    <img src="https://img.shields.io/badge/v1.9.9-2ea043?style=for-the-badge&logo=semver&logoColor=white&label=version" alt="version" />
   </a>
   <a href="#features">
     <img src="https://img.shields.io/badge/Ansible%20Export-EE0000?style=for-the-badge&logo=ansible&logoColor=white" alt="ansible" />
@@ -48,7 +48,42 @@
 
 ---
 
-## ✨ What's New in v1.9.8 — One-Line Installer
+## ✨ What's New in v1.9.9 — Selective Apply & Dotfile Fix
+
+### 🛠️ Fixed: `pdrx apply --dotfiles` on Existing Systems
+
+Previously, `pdrx apply` only deployed files listed in `tracked-dotfiles`, meaning newly-added dotfiles in the repo were silently ignored on existing systems.
+
+**Now:** `pdrx apply --dotfiles` walks the entire `DOTFILES_DIR` tree and ensures every file is symlinked/copied into `$HOME`, regardless of tracking state.
+
+```bash
+pdrx apply --dotfiles    # deploy only dotfiles (fast, no packages)
+```
+
+### 🆕 Selective Apply Flags
+
+Apply only the components you need — no more waiting for full package installs when you just want dotfiles:
+
+| Flag | What it does |
+|------|-------------|
+| `--packages` | Install only missing packages |
+| `--systemd` | Enable only systemd units |
+| `--desktop` | Restore only desktop/DE state |
+| `--dotfiles` | Deploy all dotfiles from the repo |
+
+```bash
+pdrx apply --packages --systemd   # packages + systemd only
+pdrx apply --dotfiles               # dotfiles only (fixes existing systems)
+```
+
+### Changelog
+
+| Version | Changes |
+|---------|---------|
+| **v1.9.9** | **FIX:** `apply --dotfiles` now works on existing systems (scans entire DOTFILES_DIR) |
+| | **NEW:** Selective apply flags: `--packages`, `--systemd`, `--desktop`, `--dotfiles` |
+| | **FIX:** Updated manpage and help text with new flags |
+| **v1.9.8** | **NEW:** One-line installer script - `curl .../install.sh | bash` installs binary + manpage instantly |
 
 
 ### 🩺 New: `pdrx doctor` (alias `fsck`) — System Drift Detection
