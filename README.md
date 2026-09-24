@@ -9,7 +9,7 @@
 
 <p align="center">
   <strong>🐧 Portable Dynamic Reproducible gnu/linuX</strong><br>
-  <em>Capture your Linux setup. Reproduce it anywhere. Instantly.</em>
+  <em>Capture your Linux setup. Reproduce it anywhere. Instantly. Don'tforget to star the repo if you find this tool useful for you as well.</em>
 </p>
 
 <!-- Dynamic Badges -->
