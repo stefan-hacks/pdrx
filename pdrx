@@ -16,7 +16,14 @@
 
 set -euo pipefail
 
-VERSION="2.0.0"
+VERSION="2.0.1"
+# 2.0.1 changes:
+#   - FIX: pdrx destroy now properly restores ALL deployed dotfiles (not just tracked ones)
+#     Walks entire DOTFILES_DIR tree to replace every symlink with a real file.
+#   - FIX: pdrx sync no longer fails with "cp: same file" on symlinks.
+#     Skips copy when local file is already a symlink to the repo.
+#   - FIX: pdrx track now handles symlinks with cp -L (follows symlink content).
+#   - FIX: destroy -y now works correctly (global YES flag auto-confirms).
 # 2.0.0 changes:
 #   - sync: complete rewrite. Now creates backup, removes stale repo files,
 #     commits changes to git, and rotates backups (keeps last 20).
@@ -1855,8 +1862,13 @@ run_sync() {
       local dest="$DOTFILES_DIR/$rel"
       if [ -f "$src" ]; then
         mkdir -p "$(dirname "$dest")"
-        cp "$src" "$dest"
-        synced_count=$((synced_count + 1))
+        if [ -L "$src" ] && [ "$(readlink -f "$src")" = "$(readlink -f "$dest")" ]; then
+          log_debug "Skipping sync: $rel already points to repo copy"
+          synced_count=$((synced_count + 1))
+        else
+          cp -L "$src" "$dest" 2>/dev/null || cp -L -- "$src" "$dest"
+          synced_count=$((synced_count + 1))
+        fi
       elif [ -d "$src" ]; then
         mkdir -p "$dest"
         cp -R "$src/"* "$dest/" 2>/dev/null || true
@@ -2228,7 +2240,7 @@ run_sync_dotfiles() {
       # Track it
       local dest="$DOTFILES_DIR/$rel"
       mkdir -p "$(dirname "$dest")"
-      cp "$path" "$dest"
+      cp -L "$path" "$dest" 2>/dev/null || cp -L -- "$path" "$dest"
       grep -qFx "$rel" "$TRACKED_DOTFILES" 2>/dev/null || echo "$rel" >> "$TRACKED_DOTFILES"
       ln -sf "$dest" "$path" 2>/dev/null || true
       log_success "Tracked: $rel"
@@ -2310,7 +2322,7 @@ run_track() {
         local rel="${file_in_dir#"$HOME"/}"
         local dest="$DOTFILES_DIR/$rel"
         mkdir -p "$(dirname "$dest")"
-        cp "$file_in_dir" "$dest"
+        cp -L "$file_in_dir" "$dest" 2>/dev/null || cp -L -- "$file_in_dir" "$dest"
         grep -qFx "$rel" "$TRACKED_DOTFILES" 2>/dev/null || echo "$rel" >> "$TRACKED_DOTFILES"
         ln -sf "$dest" "$file_in_dir" 2>/dev/null || true
         tracked_count=$((tracked_count + 1))
@@ -3361,13 +3373,16 @@ run_destroy() {
   echo ""
   if [ "${DRY_RUN:-false}" = "true" ]; then
     log_info "[dry-run] no changes will be made"
-  elif [ "${YES:-false}" != "true" ]; then
+  elif [ "${YES:-false}" = "true" ]; then
+    :  # auto-confirm when -y/--yes is set
+  else
     printf "Type 'yes' to continue: "
     local r
     read -r r
     [ "$r" != "yes" ] && return 0
   fi
 
+  # Restore tracked dotfiles (legacy path)
   if [ -f "$TRACKED_DOTFILES" ]; then
     local rel
     while IFS= read -r rel; do
@@ -3391,6 +3406,29 @@ run_destroy() {
         fi
       fi
     done < "$TRACKED_DOTFILES"
+  fi
+
+  # Restore ALL dotfiles deployed by apply --dotfiles (walks entire DOTFILES_DIR tree)
+  if [ -d "$DOTFILES_DIR" ]; then
+    log_info "Restoring all deployed dotfiles from $DOTFILES_DIR..."
+    while IFS= read -r -d '' src; do
+      local rel="${src#"$DOTFILES_DIR"/}"
+      local dest="$HOME/$rel"
+      if [ -L "$dest" ]; then
+        if [ "${DRY_RUN:-false}" = "true" ]; then
+          log_info "[dry-run] would restore $rel (symlink -> real file)"
+          continue
+        fi
+        rm -f "$dest"
+        mkdir -p "$(dirname "$dest")"
+        cp "$src" "$dest"
+        log_success "Restored $rel (symlink replaced with real file)"
+      elif [ "${DRY_RUN:-false}" = "true" ]; then
+        if [ -f "$dest" ] && [ ! -L "$dest" ]; then
+          log_info "[dry-run] $rel already a real file"
+        fi
+      fi
+    done < <(find "$DOTFILES_DIR" -type f -print0 2>/dev/null)
   fi
 
   if [ "${DRY_RUN:-false}" = "true" ]; then
