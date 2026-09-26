@@ -15,7 +15,7 @@
 <!-- Dynamic Badges -->
 <p align="center">
   <a href="https://github.com/stefan-hacks/pdrx/releases">
-    <img src="https://img.shields.io/badge/v2.0.1-2ea043?style=for-the-badge&logo=semver&logoColor=white&label=version" alt="version" />
+    <img src="https://img.shields.io/badge/v2.0.2-2ea043?style=for-the-badge&logo=semver&logoColor=white&label=version" alt="version" />
   </a>
   <a href="#features">
     <img src="https://img.shields.io/badge/Ansible%20Export-EE0000?style=for-the-badge&logo=ansible&logoColor=white" alt="ansible" />
@@ -48,9 +48,15 @@
 
 ---
 
-## ✨ What's New in v2.0.0 — Full Two-Way Sync with Backups
+## ✨ What's New in v2.0.2 — Testing, Fixes & Reliability
 
-### 🔄 Fixed: `pdrx sync` now properly two-way syncs
+- **FIX**: Test suite version assertion now dynamically reads from `VERSION` in pdrx script (no more hardcoded stale versions)
+- **FIX**: `Makefile` release examples now dynamically use current `VERSION` from pdrx script
+- **CI**: Added `.github/workflows/release.yml` — automated release asset generation with checksum verification
+
+---
+
+## ✨ What's New in v2.0.1 — Bug Fixes & Reliability
 
 Previously, `pdrx sync` only captured packages and systemd — dotfiles were never
 synced back to the repo, and stale files (deleted locally but still in repo)
@@ -84,6 +90,13 @@ When the 21st backup is created, the oldest is automatically removed.
 
 | Version | Changes |
 |---------|---------|
+| **v2.0.2** | **FIX:** Test suite version assertion now dynamic (reads from `VERSION` in pdrx) |
+| | **FIX:** `Makefile` release examples now dynamic (reads from `VERSION` in pdrx) |
+| | **CI:** Added `.github/workflows/release.yml` for automated release asset generation |
+| **v2.0.1** | **FIX:** `destroy` restores ALL deployed dotfiles (not just tracked ones) |
+| | **FIX:** `sync` no longer fails with "cp: same file" on symlinks |
+| | **FIX:** `track` handles symlinks with `cp -L` |
+| | **FIX:** `destroy -y` now works correctly |
 | **v2.0.0** | **FIX:** `sync` now backs up, syncs dotfiles, removes stale files, auto-commits, rotates backups |
 | | **NEW:** `_rotate_backups` helper keeps last 20 backups |
 | | **FIX:** `run_sync()` now copies dotfiles from local to repo (two-way) |

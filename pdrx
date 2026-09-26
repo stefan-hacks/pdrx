@@ -16,7 +16,11 @@
 
 set -euo pipefail
 
-VERSION="2.0.1"
+VERSION="2.0.2"
+# 2.0.2 changes:
+#   - FIX: Test suite version assertion now dynamically reads from VERSION in pdrx script.
+#   - FIX: Makefile release examples now dynamically use current VERSION from pdrx script.
+#   - CI: Added .github/workflows/release.yml for automated release asset generation.
 # 2.0.1 changes:
 #   - FIX: pdrx destroy now properly restores ALL deployed dotfiles (not just tracked ones)
 #     Walks entire DOTFILES_DIR tree to replace every symlink with a real file.
