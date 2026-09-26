@@ -1,0 +1,43 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify version consistency
+        run: |
+          script_version=$(grep '^VERSION=' pdrx | sed 's/VERSION="//;s/"$//')
+          tag_version=${GITHUB_REF_NAME#v}
+          if [ "$script_version" != "$tag_version" ]; then
+            echo "ERROR: VERSION in pdrx ($script_version) does not match tag ($tag_version)"
+            exit 1
+          fi
+          echo "Version verified: $script_version"
+
+      - name: Generate checksums
+        run: |
+          sha256sum pdrx > pdrx.sha256
+          sha256sum pdrx.1 > pdrx.1.sha256
+          cat pdrx.sha256
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            pdrx
+            pdrx.1
+            pdrx.sha256
+            pdrx.1.sha256
