@@ -82,7 +82,9 @@ test_help_version() {
     run_test "Help flag (--help)" "bash '$PDRX_SCRIPT' --help"
     run_test "Version flag (-v)" "bash '$PDRX_SCRIPT' -v"
     run_test "Version flag (--version)" "bash '$PDRX_SCRIPT' --version"
-    run_test "Version shows 1.9.0" "bash '$PDRX_SCRIPT' --version | grep -q '1.9.0'"
+    # Version test — must match current VERSION in pdrx script
+    current_version=$(grep '^VERSION=' "$PDRX_SCRIPT" | head -1 | sed 's/VERSION="//;s/"//')
+    run_test "Version shows current ($current_version)" "bash '$PDRX_SCRIPT' --version | grep -q '$current_version'"
 }
 
 test_init() {

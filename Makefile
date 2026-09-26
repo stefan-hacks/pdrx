@@ -81,11 +81,11 @@ test-all: test-debian test-fedora test-arch
 # Print the sha256 you need to paste into Formula/pdrx.rb for a given tag.
 # Usage:
 #   make formula-sha              (uses the latest git tag)
-#   make formula-sha TAG=v1.5.0
+#   make formula-sha TAG=v2.0.1
 formula-sha:
 	$(eval TAG ?= $(shell git describe --tags --abbrev=0 2>/dev/null))
 	@if [ -z "$(TAG)" ]; then \
-	  echo "No git tag found. Run: make formula-sha TAG=v1.5.0"; exit 1; \
+	  echo "No git tag found. Run: make formula-sha TAG=$$(grep '^VERSION=' $(SCRIPT) | sed 's/VERSION=\"//;s/\"$$//')"; exit 1; \
 	fi
 	@URL="https://github.com/stefan-hacks/pdrx/archive/refs/tags/$(TAG).tar.gz"; \
 	 echo "Fetching $$URL ..."; \
@@ -98,9 +98,10 @@ formula-sha:
 	 echo "Paste the lines above into $(FORMULA)."
 
 # Tag a release and push — GitHub Actions handles the rest.
-# Usage: make release TAG=v1.6.0
+# Usage: make release TAG=v2.0.1
 release:
-	@if [ -z "$(TAG)" ]; then echo "Usage: make release TAG=v1.6.0"; exit 1; fi
+	@current=$$(grep '^VERSION=' $(SCRIPT) | sed 's/VERSION=\"//;s/\"$$//'); \
+	 if [ -z "$(TAG)" ]; then echo "Usage: make release TAG=v$$current"; exit 1; fi
 	@echo "Tagging $(TAG) ..."
 	@VERSION="$$(echo $(TAG) | sed 's/^v//')"; \
 	 sed -i "s/^VERSION=.*/VERSION=\"$$VERSION\"/" $(SCRIPT); \
